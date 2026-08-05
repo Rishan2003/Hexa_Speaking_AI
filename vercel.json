@@ -16,6 +16,10 @@
       "destination": "/api/index?path=session/:path*"
     },
     {
+      "source": "/api/evaluations/generate",
+      "destination": "/api/evaluation-generate"
+    },
+    {
       "source": "/api/evaluations/:path*",
       "destination": "/api/index?path=evaluations/:path*"
     },
@@ -95,6 +99,9 @@
     },
     "api/session-mint.ts": {
       "maxDuration": 20
+    },
+    "api/evaluation-generate.ts": {
+      "maxDuration": 60
     }
   }
 }

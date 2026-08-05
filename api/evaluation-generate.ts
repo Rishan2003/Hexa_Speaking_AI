@@ -1,0 +1,493 @@
+const API_REVISION = '1.3.0-evaluation-zero-imports';
+const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
+
+function requestId() {
+  return `eval-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function send(res: any, status: number, body: Record<string, unknown>) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('X-HEXA-Evaluation-Revision', API_REVISION);
+  return res.status(status).json(body);
+}
+
+async function readJsonSafe(response: Response) {
+  const text = await response.text();
+  try {
+    return { payload: text ? JSON.parse(text) : {}, text };
+  } catch {
+    return { payload: {}, text };
+  }
+}
+
+function upstreamMessage(payload: any, fallback: string) {
+  if (typeof payload?.error?.message === 'string') return payload.error.message;
+  if (typeof payload?.message === 'string') return payload.message;
+  return fallback;
+}
+
+function roundBand(value: unknown, fallback = 6): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  const safe = Number.isFinite(n) ? n : fallback;
+  return Math.max(1, Math.min(9, Math.round(safe * 2) / 2));
+}
+
+function words(text: string): string[] {
+  return String(text || '').toLowerCase().match(/[a-z]+(?:'[a-z]+)?/g) || [];
+}
+
+function cleanStrings(value: unknown, max = 6): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item || '').trim()).filter(Boolean).slice(0, max)
+    : [];
+}
+
+function extractGeminiText(payload: any): string {
+  const parts = payload?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return '';
+  return parts.map((part: any) => typeof part?.text === 'string' ? part.text : '').join('').trim();
+}
+
+function parseJsonText(text: string): any {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) throw new Error('Gemini returned an empty evaluation response.');
+  const withoutFence = trimmed
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  return JSON.parse(withoutFence);
+}
+
+function makeSchema() {
+  const stringArray = { type: 'array', items: { type: 'string' } };
+  return {
+    type: 'object',
+    properties: {
+      confidence: { type: 'number' },
+      examinerNote: { type: 'string' },
+      evidence: stringArray,
+      strengths: stringArray,
+      priorities: stringArray,
+      actionPlan: stringArray,
+      partFeedback: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            part: { type: 'string' },
+            summary: { type: 'string' },
+            strengths: stringArray,
+            improvements: stringArray,
+            evidence: stringArray,
+          },
+          required: ['part', 'summary', 'strengths', 'improvements', 'evidence'],
+        },
+      },
+      criteria: {
+        type: 'object',
+        properties: {
+          fluencyAndCoherence: {
+            type: 'object',
+            properties: {
+              score: { type: 'number' },
+              feedback: { type: 'string' },
+              examples: stringArray,
+            },
+            required: ['score', 'feedback', 'examples'],
+          },
+          lexicalResource: {
+            type: 'object',
+            properties: {
+              score: { type: 'number' },
+              feedback: { type: 'string' },
+              improvedPhrases: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    original: { type: 'string' },
+                    improved: { type: 'string' },
+                    explanation: { type: 'string' },
+                  },
+                  required: ['original', 'improved', 'explanation'],
+                },
+              },
+            },
+            required: ['score', 'feedback', 'improvedPhrases'],
+          },
+          grammaticalRangeAccuracy: {
+            type: 'object',
+            properties: {
+              score: { type: 'number' },
+              feedback: { type: 'string' },
+              corrections: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    incorrect: { type: 'string' },
+                    correct: { type: 'string' },
+                    ruleExplanation: { type: 'string' },
+                  },
+                  required: ['incorrect', 'correct', 'ruleExplanation'],
+                },
+              },
+            },
+            required: ['score', 'feedback', 'corrections'],
+          },
+        },
+        required: ['fluencyAndCoherence', 'lexicalResource', 'grammaticalRangeAccuracy'],
+      },
+    },
+    required: ['confidence', 'examinerNote', 'evidence', 'strengths', 'priorities', 'actionPlan', 'partFeedback', 'criteria'],
+  };
+}
+
+function normalizeEvaluation(parsed: any, session: any, uid: string, model: string) {
+  const criteria = parsed?.criteria || {};
+  const fluencyRaw = criteria?.fluencyAndCoherence || {};
+  const lexicalRaw = criteria?.lexicalResource || {};
+  const grammarRaw = criteria?.grammaticalRangeAccuracy || {};
+
+  const fluencyScore = roundBand(fluencyRaw.score);
+  const lexicalScore = roundBand(lexicalRaw.score);
+  const grammarScore = roundBand(grammarRaw.score);
+  const overall = roundBand((fluencyScore + lexicalScore + grammarScore) / 3);
+
+  const candidateTurns = Array.isArray(session.transcript)
+    ? session.transcript.filter((turn: any) => turn?.speaker === 'candidate')
+    : [];
+  const allWords = candidateTurns.flatMap((turn: any) => words(turn?.text || ''));
+  const uniqueWords = new Set(allWords);
+  const wordCounts = candidateTurns.map((turn: any) => words(turn?.text || '').length);
+  const sorted = [...wordCounts].sort((a, b) => a - b);
+  const median = sorted.length
+    ? (sorted.length % 2
+      ? sorted[Math.floor(sorted.length / 2)]
+      : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2)
+    : 0;
+
+  const sessionId = String(session.id || '').trim();
+  const evaluationId = `eval_${sessionId}_v4`;
+
+  return {
+    id: evaluationId,
+    sessionId,
+    userId: uid,
+    createdAt: Date.now(),
+    estimatedOverallBand: overall,
+    bandRange: `${Math.max(1, overall - 0.5).toFixed(1)} - ${Math.min(9, overall + 0.5).toFixed(1)}`,
+    confidence: Math.max(0.35, Math.min(0.72, Number(parsed?.confidence) || 0.65)),
+    disclaimer: 'Estimated Practice Band - Transcript-based simulated assessment; pronunciation was not assessed, so this is not a complete official IELTS Speaking score.',
+    assessmentBasis: 'transcript_only',
+    evaluationEngine: 'gemini',
+    evaluationModel: model,
+    rubricVersion: 'IELTS-speaking-public-descriptors-2026-08-rest-v4',
+    evidenceStats: {
+      candidateWords: allWords.length,
+      candidateResponseTurns: candidateTurns.length,
+      averageWordsPerResponse: candidateTurns.length ? Math.round((allWords.length / candidateTurns.length) * 10) / 10 : 0,
+      medianWordsPerResponse: Math.round(median * 10) / 10,
+      longestResponseWords: Math.max(0, ...wordCounts),
+      veryShortResponses: wordCounts.filter((count) => count <= 5).length,
+      lexicalDiversity: allWords.length ? Math.round((uniqueWords.size / allWords.length) * 1000) / 1000 : 0,
+      timedCandidateResponses: candidateTurns.filter((turn: any) => Number.isFinite(turn?.startTime) && Number.isFinite(turn?.endTime) && turn.endTime > turn.startTime).length,
+      ...(typeof session?.part2Meta?.longTurnDuration === 'number'
+        ? { part2LongTurnSeconds: Math.round(session.part2Meta.longTurnDuration * 10) / 10 }
+        : {}),
+    },
+    qualityWarnings: ['Pronunciation is not assessed because this endpoint evaluates transcript evidence only.'],
+    criteria: {
+      fluencyAndCoherence: {
+        score: fluencyScore,
+        feedback: String(fluencyRaw.feedback || 'The transcript did not provide enough detail for a more specific fluency assessment.').trim(),
+        examples: cleanStrings(fluencyRaw.examples, 4),
+      },
+      lexicalResource: {
+        score: lexicalScore,
+        feedback: String(lexicalRaw.feedback || 'The transcript did not provide enough detail for a more specific lexical assessment.').trim(),
+        improvedPhrases: Array.isArray(lexicalRaw.improvedPhrases)
+          ? lexicalRaw.improvedPhrases.slice(0, 5).map((item: any) => ({
+              original: String(item?.original || '').trim(),
+              improved: String(item?.improved || '').trim(),
+              explanation: String(item?.explanation || '').trim(),
+            })).filter((item: any) => item.original && item.improved && item.explanation)
+          : [],
+      },
+      grammaticalRangeAccuracy: {
+        score: grammarScore,
+        feedback: String(grammarRaw.feedback || 'The transcript did not provide enough detail for a more specific grammar assessment.').trim(),
+        corrections: Array.isArray(grammarRaw.corrections)
+          ? grammarRaw.corrections.slice(0, 6).map((item: any) => ({
+              incorrect: String(item?.incorrect || '').trim(),
+              correct: String(item?.correct || '').trim(),
+              ruleExplanation: String(item?.ruleExplanation || '').trim(),
+            })).filter((item: any) => item.incorrect && item.correct && item.ruleExplanation)
+          : [],
+      },
+      pronunciation: {
+        score: 0,
+        status: 'not_assessed',
+        feedback: 'Pronunciation was not assessed because raw audio was not sent to the evaluation endpoint.',
+        problemWords: [],
+      },
+    },
+    examinerNote: String(parsed?.examinerNote || 'This transcript-based practice report summarizes the candidate’s observed speaking performance.').trim(),
+    evidence: cleanStrings(parsed?.evidence, 8),
+    strengths: cleanStrings(parsed?.strengths, 5),
+    priorities: cleanStrings(parsed?.priorities, 5),
+    partFeedback: Array.isArray(parsed?.partFeedback)
+      ? parsed.partFeedback.slice(0, 3).map((item: any) => ({
+          part: ['Part 1', 'Part 2', 'Part 3'].includes(String(item?.part)) ? String(item.part) : 'Part 1',
+          summary: String(item?.summary || '').trim(),
+          strengths: cleanStrings(item?.strengths, 4),
+          improvements: cleanStrings(item?.improvements, 4),
+          evidence: cleanStrings(item?.evidence, 4),
+        })).filter((item: any) => item.summary)
+      : [],
+    actionPlan: cleanStrings(parsed?.actionPlan, 6),
+    status: 'completed',
+  };
+}
+
+async function verifyFirebaseIdToken(idToken: string) {
+  const firebaseWebApiKey = String(runtimeEnv.FIREBASE_WEB_API_KEY || runtimeEnv.VITE_FIREBASE_API_KEY || '').trim();
+  if (!firebaseWebApiKey) {
+    return { ok: false as const, status: 503, code: 'FIREBASE_WEB_API_KEY_MISSING', error: 'Firebase Web API key is not available to the evaluation function.' };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(firebaseWebApiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+        signal: controller.signal,
+      }
+    );
+    const result = await readJsonSafe(response);
+    const uid = result.payload?.users?.[0]?.localId;
+    if (!response.ok || typeof uid !== 'string' || !uid) {
+      return {
+        ok: false as const,
+        status: 401,
+        code: String(result.payload?.error?.message || 'INVALID_ID_TOKEN'),
+        error: 'Your sign-in session could not be verified. Sign in again and retry.',
+      };
+    }
+    return { ok: true as const, uid };
+  } catch (error: any) {
+    return {
+      ok: false as const,
+      status: 502,
+      code: error?.name === 'AbortError' ? 'FIREBASE_AUTH_TIMEOUT' : 'FIREBASE_AUTH_NETWORK_ERROR',
+      error: error?.name === 'AbortError'
+        ? 'Firebase authentication verification timed out.'
+        : 'Could not reach Firebase Authentication to verify the user.',
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function callGemini(model: string, apiKey: string, systemInstruction: string, prompt: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 52_000);
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseFormat: {
+              text: {
+                mimeType: 'application/json',
+                schema: makeSchema(),
+              },
+            },
+          },
+        }),
+        signal: controller.signal,
+      }
+    );
+    const result = await readJsonSafe(response);
+    if (!response.ok) {
+      const error: any = new Error(upstreamMessage(result.payload, `Gemini returned HTTP ${response.status}.`));
+      error.status = response.status;
+      error.code = result.payload?.error?.status || `GEMINI_HTTP_${response.status}`;
+      throw error;
+    }
+    return result.payload;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export default async function handler(req: any, res: any) {
+  const rid = requestId();
+
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Allow', 'POST, OPTIONS');
+    return res.status(204).end();
+  }
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST, OPTIONS');
+    return send(res, 405, {
+      error: 'Method not allowed.',
+      code: 'METHOD_NOT_ALLOWED',
+      stage: 'evaluation_route',
+      requestId: rid,
+      apiRevision: API_REVISION,
+    });
+  }
+
+  try {
+    const authHeader = String(req.headers?.authorization || '');
+    if (!authHeader.startsWith('Bearer ')) {
+      return send(res, 401, {
+        error: 'Authentication is required to generate an evaluation.',
+        code: 'AUTH_REQUIRED',
+        stage: 'authentication',
+        requestId: rid,
+        apiRevision: API_REVISION,
+      });
+    }
+
+    const verified = await verifyFirebaseIdToken(authHeader.slice(7).trim());
+    if (!verified.ok) {
+      return send(res, verified.status, {
+        error: verified.error,
+        code: verified.code,
+        stage: 'authentication',
+        requestId: rid,
+        apiRevision: API_REVISION,
+      });
+    }
+
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const sessionId = String(body.sessionId || '').trim();
+    const session = body.sessionEvidence && typeof body.sessionEvidence === 'object'
+      ? body.sessionEvidence
+      : null;
+
+    if (!sessionId || !session || String(session.id || '').trim() !== sessionId) {
+      return send(res, 400, {
+        error: 'The completed session evidence was not supplied to the evaluator.',
+        code: 'EVALUATION_EVIDENCE_MISSING',
+        stage: 'session_evidence',
+        requestId: rid,
+        apiRevision: API_REVISION,
+      });
+    }
+
+    if (session.userId && String(session.userId) !== verified.uid) {
+      return send(res, 403, {
+        error: 'This session belongs to another user.',
+        code: 'EVALUATION_SESSION_OWNER_MISMATCH',
+        stage: 'session_evidence',
+        requestId: rid,
+        apiRevision: API_REVISION,
+      });
+    }
+
+    const transcript = Array.isArray(session.transcript) ? session.transcript : [];
+    const candidateTurns = transcript.filter((turn: any) => turn?.speaker === 'candidate' && String(turn?.text || '').trim());
+    if (!candidateTurns.length) {
+      return send(res, 422, {
+        error: 'There is no candidate speech in the transcript to evaluate.',
+        code: 'EVALUATION_TRANSCRIPT_EMPTY',
+        stage: 'session_evidence',
+        requestId: rid,
+        apiRevision: API_REVISION,
+      });
+    }
+
+    const apiKey = String(runtimeEnv.GEMINI_API_KEY || '').trim();
+    if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+      return send(res, 503, {
+        error: 'GEMINI_API_KEY is not configured on the server.',
+        code: 'GEMINI_NOT_CONFIGURED',
+        stage: 'gemini_configuration',
+        requestId: rid,
+        apiRevision: API_REVISION,
+      });
+    }
+
+    const primaryModel = String(runtimeEnv.GEMINI_EVALUATION_MODEL || 'gemini-3.6-flash').trim();
+    const fallbackModel = String(runtimeEnv.GEMINI_EVALUATION_FALLBACK_MODEL || 'gemini-3.5-flash').trim();
+
+    const systemInstruction = `You are a strict IELTS Speaking practice evaluator. This is not an official IELTS result.\n\nAssess ONLY the candidate language in the supplied transcript. Score Fluency and Coherence, Lexical Resource, and Grammatical Range and Accuracy from 1.0 to 9.0 in 0.5 increments. Do not assess pronunciation because raw audio is not supplied.\n\nEvery quotation, correction, vocabulary upgrade, strength, priority, and part-level observation must be grounded in the candidate transcript. Do not invent candidate wording. Ignore examiner language when scoring. Do not mechanically score from word count. Use IELTS-style public band distinctions and explain the limiting feature that prevents the next band when relevant.\n\nReturn concise but detailed diagnostic feedback suitable for a learner. Output must conform to the supplied JSON schema.`;
+
+    const compactTranscript = transcript.map((turn: any) => ({
+      speaker: turn?.speaker,
+      text: String(turn?.text || ''),
+      questionId: turn?.questionId || null,
+      sequence: turn?.sequence ?? null,
+      startTime: turn?.startTime ?? null,
+      endTime: turn?.endTime ?? null,
+    }));
+
+    const prompt = `SESSION\nID: ${sessionId}\nMode: ${session?.selectedTestSnapshot?.mode || session?.currentPart || 'unknown'}\nStatus: ${session?.status || 'completed'}\n\nPART 2 METADATA\n${JSON.stringify(session?.part2Meta || null)}\n\nTEST SNAPSHOT\n${JSON.stringify(session?.selectedTestSnapshot || { topic: session?.topic || '' })}\n\nTRANSCRIPT\n${JSON.stringify(compactTranscript)}\n\nGenerate the evidence-based IELTS Speaking practice assessment now.`;
+
+    let model = primaryModel;
+    let payload: any;
+    try {
+      payload = await callGemini(model, apiKey, systemInstruction, prompt);
+    } catch (error: any) {
+      const unavailable = error?.status === 404 || String(error?.message || '').toLowerCase().includes('not found');
+      if (unavailable && fallbackModel && fallbackModel !== primaryModel) {
+        model = fallbackModel;
+        payload = await callGemini(model, apiKey, systemInstruction, prompt);
+      } else {
+        throw error;
+      }
+    }
+
+    let parsed: any;
+    try {
+      parsed = parseJsonText(extractGeminiText(payload));
+    } catch (error: any) {
+      return send(res, 502, {
+        error: error?.message || 'Gemini returned unusable evaluation JSON.',
+        code: 'EVALUATION_RESPONSE_INVALID',
+        stage: 'gemini_response',
+        requestId: rid,
+        apiRevision: API_REVISION,
+        evaluationModel: model,
+      });
+    }
+
+    const evaluation = normalizeEvaluation(parsed, { ...session, id: sessionId, userId: verified.uid }, verified.uid, model);
+
+    return send(res, 200, {
+      ...evaluation,
+      requestId: rid,
+      apiRevision: API_REVISION,
+    });
+  } catch (error: any) {
+    const timedOut = error?.name === 'AbortError';
+    const status = timedOut ? 504 : (Number(error?.status) >= 400 ? 502 : 500);
+    console.error('[HEXA evaluation zero-imports]', rid, error?.name, error?.message);
+    return send(res, status, {
+      error: timedOut
+        ? 'Gemini evaluation timed out. Please retry the assessment.'
+        : (error?.message || 'The evaluation endpoint encountered an unexpected error.'),
+      code: timedOut ? 'EVALUATION_TIMEOUT' : (error?.code || 'EVALUATION_UNEXPECTED_ERROR'),
+      stage: 'gemini_evaluation',
+      upstreamStatus: error?.status || undefined,
+      requestId: rid,
+      apiRevision: API_REVISION,
+    });
+  }
+}
