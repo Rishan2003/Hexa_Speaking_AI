@@ -4,6 +4,10 @@
   "outputDirectory": "public",
   "rewrites": [
     {
+      "source": "/api/session/create",
+      "destination": "/api/session-create"
+    },
+    {
       "source": "/api/session/:path*",
       "destination": "/api/index?path=session/:path*"
     },
@@ -81,6 +85,9 @@
     },
     "api/readiness.ts": {
       "maxDuration": 10
+    },
+    "api/session-create.ts": {
+      "maxDuration": 30
     }
   }
 }

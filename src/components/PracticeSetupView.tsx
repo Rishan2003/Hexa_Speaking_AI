@@ -348,7 +348,10 @@ export const PracticeSetupView: React.FC = () => {
           errorPayload.error || `Could not create the session (${response.status}).`,
           errorPayload.code ? `Code: ${errorPayload.code}` : '',
           errorPayload.stage ? `Stage: ${errorPayload.stage}` : '',
+          errorPayload.diagnostic ? `Diagnostic: ${errorPayload.diagnostic}` : '',
+          errorPayload.runtimeErrorCode ? `Runtime: ${errorPayload.runtimeErrorCode}` : '',
           errorPayload.requestId ? `Request ID: ${errorPayload.requestId}` : '',
+          errorPayload.apiRevision ? `API: ${errorPayload.apiRevision}` : '',
         ].filter(Boolean).join(' · ');
         throw new Error(details);
       }

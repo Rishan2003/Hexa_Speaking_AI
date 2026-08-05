@@ -423,13 +423,17 @@ export const FirebaseRepository = {
 
     try {
       const db = getFirebaseDb();
+      // Keep this query on the automatic single-field userId index so a fresh
+      // Firebase project does not require a manual composite index just to load
+      // the dashboard. Sort the user's usually-small history client-side.
       const q = query(
         getSpeakingSessionsCollection(db),
-        where('userId', '==', userId),
-        orderBy('createdAt', 'desc')
+        where('userId', '==', userId)
       );
       const querySnap = await getDocs(q);
-      return querySnap.docs.map(doc => doc.data() as IELTSPracticeSession);
+      return querySnap.docs
+        .map(doc => doc.data() as IELTSPracticeSession)
+        .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     } catch (err) {
       if (isFirestoreConnectivityError(err)) {
         console.warn('[FirebaseRepository] Firestore history is offline; using the local recovery history.');

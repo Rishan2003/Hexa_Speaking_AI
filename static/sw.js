@@ -3,7 +3,7 @@
  * @license Apache-2.0
  */
 
-const CACHE_NAME = 'speakready-pwa-v4';
+const CACHE_NAME = 'speakready-pwa-v5';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
