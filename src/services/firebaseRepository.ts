@@ -33,12 +33,15 @@ import {
   updateDoc 
 } from 'firebase/firestore';
 import { IELTSPracticeSession, IELTSEvaluation, SpeechChunk, ExamState, IELTSExamPart, UserProfile, RecordingMetadata, ProviderMetadata, SessionStatus } from '../types';
+import { generateTestSnapshot } from './questionBank';
 import { MockPracticeService } from './mockService';
 import { APP_CONFIG } from '../config';
 
 export { isFirebaseEnabled } from './firebaseClient';
 
 const shouldUseLocalSandbox = (): boolean => APP_CONFIG.useMocks || !isFirebaseEnabled();
+
+const stripUndefined = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 export const FirebaseRepository = {
   /**
@@ -122,23 +125,31 @@ export const FirebaseRepository = {
    * Create a new IELTS Speaking Practice Session in Firestore.
    */
   async createSpeakingSession(session: IELTSPracticeSession): Promise<void> {
+    // Always retain the complete deterministic snapshot in local recovery storage.
+    MockPracticeService.upsertSession(session);
+
     if (shouldUseLocalSandbox()) {
-      MockPracticeService.upsertSession(session);
       return;
     }
 
     try {
       const db = getFirebaseDb();
       const sessionRef = doc(getSpeakingSessionsCollection(db), session.id);
-      
-      const firestoreSession: FirestoreSpeakingSession = {
-        ...session,
-        updatedAt: Date.now()
-      };
+      const snapshot = session.selectedTestSnapshot;
+
+      // Current Firestore rules intentionally reject client-created selectedTestSnapshot.
+      // Persist safe reconstruction metadata instead, while keeping the full snapshot locally.
+      const { selectedTestSnapshot: _localOnlySnapshot, ...sessionWithoutSnapshot } = session;
+      const firestoreSession = stripUndefined({
+        ...sessionWithoutSnapshot,
+        updatedAt: Date.now(),
+        snapshotSeed: snapshot?.seed,
+        practiceMode: snapshot?.mode,
+        snapshotCueCardId: snapshot?.part2CueCard?.id
+      }) as FirestoreSpeakingSession;
 
       await setDoc(sessionRef, firestoreSession);
 
-      // Initialize session parts subcollection
       const parts = [
         { id: 'part-1', sessionId: session.id, partIndex: 1, status: 'idle' as const, startedAt: Date.now() },
         { id: 'part-2', sessionId: session.id, partIndex: 2, status: 'idle' as const, startedAt: Date.now() },
@@ -477,26 +488,49 @@ export const FirebaseRepository = {
    * Fetch a single speaking session by ID from Firestore or mock fallback.
    */
   async getSessionById(sessionId: string): Promise<IELTSPracticeSession | undefined> {
+    const localSession = MockPracticeService.getSessionById(sessionId);
+
     if (shouldUseLocalSandbox()) {
-      return MockPracticeService.getSessionById(sessionId);
+      return localSession;
     }
 
     try {
       const db = getFirebaseDb();
       const docRef = doc(getSpeakingSessionsCollection(db), sessionId);
       const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        return docSnap.data() as IELTSPracticeSession;
+      if (!docSnap.exists()) {
+        return localSession;
       }
-      return undefined;
+
+      const remote = docSnap.data() as IELTSPracticeSession & {
+        snapshotSeed?: string;
+        practiceMode?: 'full' | 'part1' | 'part2' | 'part3';
+        snapshotCueCardId?: string;
+      };
+
+      let selectedTestSnapshot = remote.selectedTestSnapshot || localSession?.selectedTestSnapshot;
+      if (!selectedTestSnapshot && remote.snapshotSeed && remote.practiceMode) {
+        selectedTestSnapshot = generateTestSnapshot(
+          remote.snapshotSeed,
+          remote.practiceMode,
+          remote.snapshotCueCardId
+        );
+      }
+
+      const merged = {
+        ...localSession,
+        ...remote,
+        ...(selectedTestSnapshot ? { selectedTestSnapshot } : {}),
+      } as IELTSPracticeSession;
+
+      MockPracticeService.upsertSession(merged);
+      return merged;
     } catch (err) {
+      console.warn('[FirebaseRepository] Firestore session lookup failed; using the local recovery copy.', err);
       if (isFirestoreConnectivityError(err)) {
-        console.warn('[FirebaseRepository] Firestore session lookup is offline; using the local recovery copy.');
         void reconnectFirebaseNetwork();
-        return MockPracticeService.getSessionById(sessionId);
       }
-      console.error('Failed to fetch session by id:', err);
-      throw err;
+      return localSession;
     }
   },
 

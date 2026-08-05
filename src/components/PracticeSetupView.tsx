@@ -7,7 +7,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from '../services/routerContext';
 import { useAuth } from '../services/authContext';
 import { MockPracticeService } from '../services/mockService';
-import { isFirebaseEnabled, getFirebaseAuth } from '../services/firebaseClient';
+import { isFirebaseEnabled } from '../services/firebaseClient';
+import { FirebaseRepository } from '../services/firebaseRepository';
 import { CUE_CARDS_BANK, generateTestSnapshot } from '../services/questionBank';
 import { APP_CONFIG } from '../config';
 import { 
@@ -314,60 +315,41 @@ export const PracticeSetupView: React.FC = () => {
         return;
       }
 
-      let headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      
-      // Secure Firebase Token Authorization
-      const isFb = isFirebaseEnabled();
-      if (isFb) {
-        const auth = getFirebaseAuth();
-        if (!auth.currentUser) {
-          throw new Error('Your sign-in session has expired. Please sign in again.');
+      // Vercel-safe launch path: session creation no longer depends on /api/session/create.
+      // The question snapshot is deterministic and can be generated locally; Firebase persistence
+      // is best-effort and the full snapshot is always mirrored to local recovery storage.
+      if (!user?.uid) {
+        throw new Error('Your sign-in session has expired. Please sign in again.');
+      }
+
+      const card = CUE_CARDS_BANK.find(c => c.id === selectedCueCardId) || CUE_CARDS_BANK[0];
+      const seed = `seed-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      const snapshot = generateTestSnapshot(
+        seed,
+        selectedMode,
+        selectedMode === 'part1' ? undefined : card.id
+      );
+
+      const newSession = MockPracticeService.createSession(
+        card.title,
+        selectedMode === 'part1' ? undefined : card.id,
+        snapshot
+      );
+      newSession.userId = user.uid;
+      MockPracticeService.upsertSession(newSession);
+
+      if (isFirebaseEnabled()) {
+        try {
+          await FirebaseRepository.createSpeakingSession(newSession);
+        } catch (persistenceError) {
+          // Do not block a speaking session because Firestore is temporarily unavailable.
+          console.warn('[PracticeSetup] Firestore session persistence degraded; continuing with local recovery copy.', persistenceError);
         }
-        const token = await auth.currentUser.getIdToken();
-        headers['Authorization'] = `Bearer ${token}`;
-      } else {
-        const uid = user?.uid || 'mock-user-id';
-        headers['Authorization'] = `Bearer mock-token-${uid}`;
       }
 
-      const response = await fetch('/api/session/create', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          mode: selectedMode,
-          seed: `seed-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-          cueCardId: selectedMode === 'part1' ? undefined : selectedCueCardId
-        })
-      });
-
-      if (!response.ok) {
-        const errorPayload = await response.json().catch(() => ({}));
-        const details = [
-          errorPayload.error || `Could not create the session (${response.status}).`,
-          errorPayload.code ? `Code: ${errorPayload.code}` : '',
-          errorPayload.stage ? `Stage: ${errorPayload.stage}` : '',
-          errorPayload.diagnostic ? `Diagnostic: ${errorPayload.diagnostic}` : '',
-          errorPayload.runtimeErrorCode ? `Runtime: ${errorPayload.runtimeErrorCode}` : '',
-          errorPayload.requestId ? `Request ID: ${errorPayload.requestId}` : '',
-          errorPayload.apiRevision ? `API: ${errorPayload.apiRevision}` : '',
-        ].filter(Boolean).join(' · ');
-        throw new Error(details);
-      }
-
-      const newSession = await response.json();
-      
-      // Mirror the server-created session locally for recovery and offline rendering.
-      if (newSession && newSession.id) {
-        MockPracticeService.upsertSession(newSession);
-
-        // Stop precheck audio streams immediately before launching to avoid hardware conflicts!
-        stopMicrophoneStream();
-
-        // Direct routing redirect
-        navigate('/practice', { sessionId: newSession.id });
-      }
+      // Stop precheck audio streams immediately before launching to avoid hardware conflicts!
+      stopMicrophoneStream();
+      navigate('/practice', { sessionId: newSession.id });
     } catch (err: any) {
       console.error('Error starting speaking session:', err);
 
