@@ -94,7 +94,16 @@ export class GeminiLiveAdapter implements RealtimeVoiceProvider {
       const responseBody = await response.json().catch(() => ({}));
       if (!response.ok) {
         const detail = responseBody?.error || response.statusText || `HTTP ${response.status}`;
-        throw new Error(`Failed to mint a Gemini Live token: ${detail}`);
+        const diagnostics = [
+          responseBody?.code ? `Code: ${responseBody.code}` : '',
+          responseBody?.stage ? `Stage: ${responseBody.stage}` : '',
+          responseBody?.upstreamStatus ? `Google HTTP: ${responseBody.upstreamStatus}` : '',
+          responseBody?.requestId ? `Request ID: ${responseBody.requestId}` : '',
+          responseBody?.apiRevision ? `API: ${responseBody.apiRevision}` : '',
+        ].filter(Boolean).join(' · ');
+        throw new Error(
+          `Failed to mint a Gemini Live token: ${detail}${diagnostics ? `\n${diagnostics}` : ''}`
+        );
       }
 
       const ephemeralToken = responseBody?.token;

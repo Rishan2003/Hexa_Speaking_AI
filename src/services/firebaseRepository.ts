@@ -466,13 +466,30 @@ export const FirebaseRepository = {
 
     try {
       const db = getFirebaseDb();
-      const q = query(
-        getEvaluationsCollection(db),
-        where('sessionId', '==', sessionId)
-      );
-      const querySnap = await getDocs(q);
-      if (querySnap.empty) return null;
-      return querySnap.docs[0].data() as IELTSEvaluation;
+
+      // Firestore security rules are not filters. A collection query that only
+      // filters by sessionId can be rejected because the rules protect each
+      // evaluation by userId. Resolve the already-authorized session document
+      // first, then fetch its linked evaluation by exact document ID. This uses
+      // two owner-authorized document reads and needs no composite index.
+      const sessionRef = doc(getSpeakingSessionsCollection(db), sessionId);
+      const sessionSnap = await getDoc(sessionRef);
+      if (!sessionSnap.exists()) {
+        return MockPracticeService.getEvaluationForSession(sessionId) || null;
+      }
+
+      const sessionData = sessionSnap.data() as IELTSPracticeSession & { evaluationId?: string };
+      const evaluationId = typeof sessionData.evaluationId === 'string'
+        ? sessionData.evaluationId.trim()
+        : '';
+      if (!evaluationId) {
+        return MockPracticeService.getEvaluationForSession(sessionId) || null;
+      }
+
+      const evaluationRef = doc(getEvaluationsCollection(db), evaluationId);
+      const evaluationSnap = await getDoc(evaluationRef);
+      if (!evaluationSnap.exists()) return null;
+      return evaluationSnap.data() as IELTSEvaluation;
     } catch (err) {
       if (isFirestoreConnectivityError(err)) {
         console.warn('[FirebaseRepository] Firestore evaluation lookup is offline; using the local recovery copy.');

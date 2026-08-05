@@ -8,6 +8,10 @@
       "destination": "/api/session-create"
     },
     {
+      "source": "/api/session/mint",
+      "destination": "/api/session-mint"
+    },
+    {
       "source": "/api/session/:path*",
       "destination": "/api/index?path=session/:path*"
     },
@@ -88,6 +92,9 @@
     },
     "api/session-create.ts": {
       "maxDuration": 30
+    },
+    "api/session-mint.ts": {
+      "maxDuration": 20
     }
   }
 }
