@@ -1,4 +1,4 @@
-const API_REVISION = '1.3.0-evaluation-zero-imports';
+const API_REVISION = '1.3.1-evaluation-json-mode-fix';
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
 function requestId() {
@@ -310,12 +310,8 @@ async function callGemini(model: string, apiKey: string, systemInstruction: stri
           systemInstruction: { parts: [{ text: systemInstruction }] },
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
           generationConfig: {
-            responseFormat: {
-              text: {
-                mimeType: 'application/json',
-                schema: makeSchema(),
-              },
-            },
+            responseMimeType: 'application/json',
+            responseJsonSchema: makeSchema(),
           },
         }),
         signal: controller.signal,
