@@ -1,0 +1,123 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Deny all reads/writes by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable Authentication / Authorization Helpers
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' || 
+        request.auth.token.admin == true
+      );
+    }
+
+    // 1. User Profiles Collection
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) 
+        && request.resource.data.role == 'student' // Force standard students role by default
+        && (!request.resource.data.keys().hasAny(['admin']) || isAdmin());
+      allow update: if isOwner(userId)
+        && request.resource.data.uid == resource.data.uid
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'admin', 'uid'])
+          || isAdmin()
+        );
+    }
+
+    // 2. Question Sets Collection
+    match /questionSets/{setId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 3. Topics Collection
+    match /topics/{topicId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // 4. Questions Collection
+    match /questions/{questionId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Helper to fetch session data for subcollection validation
+    function getSessionData(sessionId) {
+      return get(/databases/$(database)/documents/speakingSessions/$(sessionId)).data;
+    }
+
+    // 5. Speaking Sessions Collection
+    match /speakingSessions/{sessionId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() 
+        && request.resource.data.userId == request.auth.uid
+        && !request.resource.data.keys().hasAny(['selectedTestSnapshot']); // Force server-side creation for snapshots
+      allow update: if isAuthenticated() 
+        && (resource.data.userId == request.auth.uid || isAdmin())
+        && request.resource.data.userId == resource.data.userId // Prevent hijacking session to another user
+        && (!request.resource.data.keys().hasAny(['selectedTestSnapshot']) || request.resource.data.selectedTestSnapshot == resource.data.selectedTestSnapshot); // Immutable snapshots
+      allow delete: if isAdmin();
+
+      // 6. Session Parts Subcollection
+      match /parts/{partId} {
+        allow read: if isAuthenticated() && (getSessionData(sessionId).userId == request.auth.uid || isAdmin());
+        allow create, update: if isAuthenticated() && (getSessionData(sessionId).userId == request.auth.uid || isAdmin());
+        allow delete: if isAdmin();
+      }
+
+      // 7. Session Turns Subcollection (Idempotent speech chunks)
+      match /turns/{turnId} {
+        allow read: if isAuthenticated() && (getSessionData(sessionId).userId == request.auth.uid || isAdmin());
+        allow create: if isAuthenticated() 
+          && getSessionData(sessionId).userId == request.auth.uid;
+        allow update: if isAuthenticated() && (getSessionData(sessionId).userId == request.auth.uid || isAdmin());
+        allow delete: if isAdmin();
+      }
+    }
+
+    // 8. Evaluations Collection
+    match /evaluations/{evaluationId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create, update: if isAdmin(); // Can only be written/edited by Admin or Server operations
+      allow delete: if isAdmin();
+    }
+
+    // 9. Feedback Collection
+    match /feedback/{feedbackId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() 
+        && (resource.data.userId == request.auth.uid || isAdmin())
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if isAdmin();
+    }
+
+    // 10. Usage Events Collection
+    match /usageEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false; // Logs are write-once, immutable
+    }
+
+    // 11. User Limits Collection
+    match /userLimits/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isAdmin(); // Read-only for standard users; updated via secure server endpoints
+      allow delete: if isAdmin();
+    }
+  }
+}

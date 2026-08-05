@@ -1,0 +1,24 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Deny all reads/writes by default
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Explicit path pattern matching: speaking-recordings/{uid}/{sessionId}/{recordingId}
+    match /speaking-recordings/{uid}/{sessionId}/{recordingId} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      
+      // Validate recording uploads and cap each object at 25 MiB.
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource != null
+        && request.resource.size <= 25 * 1024 * 1024
+        && request.resource.contentType.matches('audio/.*');
+
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#2f337f" />
+    <meta name="description" content="HEXA'S Education Speaking AI - realtime IELTS speaking practice with an AI voice examiner and structured feedback." />
+    <title>HEXA'S Education | Speaking AI</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <script type="module" crossorigin src="/assets/index-DMzH_8hE.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-G5erZz3a.css">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch((err) => {
+            console.warn('[PWA] Service worker registration failed:', err);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>
+

@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+:root {
+  --hexa-navy: #2f337f;
+  --hexa-navy-deep: #20245f;
+  --hexa-red: #ed1c24;
+  --hexa-red-dark: #c9151c;
+  --hexa-soft: #f7f8fd;
+  --hexa-soft-blue: #eef0fb;
+  --hexa-ink: #111827;
+}
+
+html {
+  background: var(--hexa-soft);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(47, 51, 127, 0.055), transparent 30rem),
+    radial-gradient(circle at 100% 15%, rgba(237, 28, 36, 0.035), transparent 24rem),
+    var(--hexa-soft);
+  color: var(--hexa-ink);
+}
+
+.hexa-grid-bg {
+  background-image:
+    linear-gradient(rgba(47, 51, 127, 0.032) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(47, 51, 127, 0.032) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+.hexa-brand-panel {
+  background:
+    radial-gradient(circle at 85% 15%, rgba(255,255,255,.14), transparent 14rem),
+    linear-gradient(145deg, var(--hexa-navy-deep) 0%, var(--hexa-navy) 72%, #3c4092 100%);
+}
+
+.hexa-brand-card {
+  box-shadow: 0 22px 55px rgba(31, 36, 95, 0.12);
+}
+
+.hexa-primary-btn {
+  background: var(--hexa-red);
+  color: white;
+  box-shadow: 0 10px 24px rgba(237, 28, 36, 0.18);
+}
+
+.hexa-primary-btn:hover {
+  background: var(--hexa-red-dark);
+}
+
+.hexa-focus:focus {
+  outline: none;
+  border-color: rgba(47, 51, 127, .65);
+  box-shadow: 0 0 0 4px rgba(47, 51, 127, .09);
+}
