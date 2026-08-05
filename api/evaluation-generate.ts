@@ -1,4 +1,5 @@
-const API_REVISION = '1.3.1-evaluation-json-mode-fix';
+const API_REVISION = '1.3.2-assumed-pronunciation-6';
+const DEFAULT_PRONUNCIATION_BAND = 6.0;
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
 function requestId() {
@@ -153,7 +154,8 @@ function normalizeEvaluation(parsed: any, session: any, uid: string, model: stri
   const fluencyScore = roundBand(fluencyRaw.score);
   const lexicalScore = roundBand(lexicalRaw.score);
   const grammarScore = roundBand(grammarRaw.score);
-  const overall = roundBand((fluencyScore + lexicalScore + grammarScore) / 3);
+  const pronunciationScore = DEFAULT_PRONUNCIATION_BAND;
+  const overall = roundBand((fluencyScore + lexicalScore + grammarScore + pronunciationScore) / 4);
 
   const candidateTurns = Array.isArray(session.transcript)
     ? session.transcript.filter((turn: any) => turn?.speaker === 'candidate')
@@ -169,7 +171,7 @@ function normalizeEvaluation(parsed: any, session: any, uid: string, model: stri
     : 0;
 
   const sessionId = String(session.id || '').trim();
-  const evaluationId = `eval_${sessionId}_v4`;
+  const evaluationId = `eval_${sessionId}_v5`;
 
   return {
     id: evaluationId,
@@ -179,7 +181,7 @@ function normalizeEvaluation(parsed: any, session: any, uid: string, model: stri
     estimatedOverallBand: overall,
     bandRange: `${Math.max(1, overall - 0.5).toFixed(1)} - ${Math.min(9, overall + 0.5).toFixed(1)}`,
     confidence: Math.max(0.35, Math.min(0.72, Number(parsed?.confidence) || 0.65)),
-    disclaimer: 'Estimated Practice Band - Transcript-based simulated assessment; pronunciation was not assessed, so this is not a complete official IELTS Speaking score.',
+    disclaimer: 'Estimated Practice Band - Fluency, vocabulary, and grammar are transcript-evaluated. Pronunciation is assumed at Band 6.0 because raw audio pronunciation analysis is not enabled. This is not an official IELTS Speaking score.',
     assessmentBasis: 'transcript_only',
     evaluationEngine: 'gemini',
     evaluationModel: model,
@@ -197,7 +199,7 @@ function normalizeEvaluation(parsed: any, session: any, uid: string, model: stri
         ? { part2LongTurnSeconds: Math.round(session.part2Meta.longTurnDuration * 10) / 10 }
         : {}),
     },
-    qualityWarnings: ['Pronunciation is not assessed because this endpoint evaluates transcript evidence only.'],
+    qualityWarnings: ['Pronunciation is assumed at Band 6.0 for overall-score calculation because this endpoint evaluates transcript evidence only. It is not an audio-assessed pronunciation score.'],
     criteria: {
       fluencyAndCoherence: {
         score: fluencyScore,
@@ -227,9 +229,9 @@ function normalizeEvaluation(parsed: any, session: any, uid: string, model: stri
           : [],
       },
       pronunciation: {
-        score: 0,
-        status: 'not_assessed',
-        feedback: 'Pronunciation was not assessed because raw audio was not sent to the evaluation endpoint.',
+        score: pronunciationScore,
+        status: 'assumed',
+        feedback: 'Assumed Band 6.0 for provisional overall-score calculation. Pronunciation was not evaluated from audio.',
         problemWords: [],
       },
     },

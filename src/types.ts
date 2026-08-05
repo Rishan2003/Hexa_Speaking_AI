@@ -217,7 +217,7 @@ export type EvaluationStatus = 'queued' | 'processing' | 'completed' | 'failed';
 
 export interface PronunciationDetails {
   score: number;
-  status?: 'assessed' | 'not_assessed';
+  status?: 'assessed' | 'assumed' | 'not_assessed';
   feedback: string;
   problemWords: string[];
 }

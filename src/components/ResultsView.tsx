@@ -418,6 +418,8 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
   }
 
   const isPronunciationAssessed = evaluation.criteria.pronunciation.status === 'assessed' && evaluation.criteria.pronunciation.score > 0;
+  const isPronunciationAssumed = evaluation.criteria.pronunciation.status === 'assumed' && evaluation.criteria.pronunciation.score > 0;
+  const isPronunciationUnavailable = !isPronunciationAssessed && !isPronunciationAssumed;
   const isTranscriptOnly = evaluation.assessmentBasis !== 'transcript_and_audio' || !isPronunciationAssessed;
   const isSandboxEvaluation = evaluation.evaluationEngine === 'sandbox';
   const confidencePercent = Math.round((evaluation.confidence ?? (isTranscriptOnly ? 0.68 : 0.86)) * 100);
@@ -647,7 +649,15 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
         {/* Pronunciation */}
         <div className="border border-gray-100 bg-white rounded-2xl p-5 shadow-sm space-y-1">
           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Pronunciation</span>
-          {!isPronunciationAssessed ? (
+          {isPronunciationAssumed ? (
+            <div className="pt-1">
+              <div className="flex items-end gap-2">
+                <span className="text-3xl font-black text-[var(--hexa-navy)] block font-mono">{evaluation.criteria.pronunciation.score.toFixed(1)}</span>
+                <span className="mb-1 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">Assumed</span>
+              </div>
+              <p className="text-[10px] text-amber-900 mt-2 leading-normal">Not audio-assessed</p>
+            </div>
+          ) : isPronunciationUnavailable ? (
             <div className="pt-1">
               <span className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-md inline-block">
                 Not Assessed
@@ -665,8 +675,23 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
         </div>
       </section>
 
-      {/* Clear Not Assessed Presentation Callout when Pronunciation missing */}
-      {!isPronunciationAssessed && (
+      {/* Pronunciation assumption / unavailable notice */}
+      {isPronunciationAssumed && (
+        <section aria-label="Pronunciation Assumption Notice" className="bg-amber-50/70 border border-amber-200 rounded-2xl p-5 space-y-2 text-xs text-amber-950">
+          <div className="flex items-center gap-2">
+            <Info size={18} className="text-amber-700 shrink-0" />
+            <h3 className="font-extrabold text-sm">Pronunciation Criterion: 6.0 Assumed</h3>
+          </div>
+          <p className="leading-relaxed">
+            A default Band 6.0 is included in the provisional overall-band calculation because this evaluation currently uses transcript evidence rather than pronunciation audio analysis.
+          </p>
+          <p className="text-[11px] text-amber-900/80 italic pt-1">
+            This 6.0 is a scoring assumption, not an observed pronunciation assessment.
+          </p>
+        </section>
+      )}
+
+      {isPronunciationUnavailable && (
         <section aria-label="Pronunciation Evidence Notice" className="bg-amber-50/70 border border-amber-200 rounded-2xl p-5 space-y-2 text-xs text-amber-950">
           <div className="flex items-center gap-2">
             <Info size={18} className="text-amber-700 shrink-0" />
@@ -674,9 +699,6 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
           </div>
           <p className="leading-relaxed">
             {evaluation.criteria.pronunciation.feedback || 'Pronunciation was not evaluated as raw audio recording evidence was unavailable for phonetics analysis.'}
-          </p>
-          <p className="text-[11px] text-amber-900/80 italic pt-1">
-            Note: Pronunciation is excluded from this practice estimate when the evaluator has no usable raw audio. The report therefore has lower confidence than a four-criterion audio-backed assessment.
           </p>
         </section>
       )}
