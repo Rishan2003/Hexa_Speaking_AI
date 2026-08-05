@@ -496,6 +496,12 @@ export const FirebaseRepository = {
         void reconnectFirebaseNetwork();
         return MockPracticeService.getEvaluationForSession(sessionId) || null;
       }
+      // A stale/legacy session may reference an evaluation that the current
+      // user is not allowed to read. That should not break the whole dashboard.
+      if ((err as any)?.code === 'permission-denied') {
+        console.warn('[FirebaseRepository] Evaluation is not readable for this session; hiding it from the dashboard.');
+        return MockPracticeService.getEvaluationForSession(sessionId) || null;
+      }
       console.error('Failed to fetch session evaluation:', err);
       throw err;
     }
