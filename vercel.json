@@ -20,6 +20,10 @@
       "destination": "/api/evaluation-generate"
     },
     {
+      "source": "/api/feedback/voice",
+      "destination": "/api/feedback-voice"
+    },
+    {
       "source": "/api/evaluations/:path*",
       "destination": "/api/index?path=evaluations/:path*"
     },
@@ -101,6 +105,9 @@
       "maxDuration": 20
     },
     "api/evaluation-generate.ts": {
+      "maxDuration": 60
+    },
+    "api/feedback-voice.ts": {
       "maxDuration": 60
     }
   }

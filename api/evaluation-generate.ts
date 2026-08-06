@@ -1,4 +1,4 @@
-const API_REVISION = '1.3.2-assumed-pronunciation-6';
+const API_REVISION = '1.4.0-bangla-voice-feedback';
 const DEFAULT_PRONUNCIATION_BAND = 6.0;
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
@@ -67,6 +67,7 @@ function makeSchema() {
     properties: {
       confidence: { type: 'number' },
       examinerNote: { type: 'string' },
+      voiceFeedbackBangla: { type: 'string' },
       evidence: stringArray,
       strengths: stringArray,
       priorities: stringArray,
@@ -141,7 +142,7 @@ function makeSchema() {
         required: ['fluencyAndCoherence', 'lexicalResource', 'grammaticalRangeAccuracy'],
       },
     },
-    required: ['confidence', 'examinerNote', 'evidence', 'strengths', 'priorities', 'actionPlan', 'partFeedback', 'criteria'],
+    required: ['confidence', 'examinerNote', 'voiceFeedbackBangla', 'evidence', 'strengths', 'priorities', 'actionPlan', 'partFeedback', 'criteria'],
   };
 }
 
@@ -236,6 +237,7 @@ function normalizeEvaluation(parsed: any, session: any, uid: string, model: stri
       },
     },
     examinerNote: String(parsed?.examinerNote || 'This transcript-based practice report summarizes the candidate’s observed speaking performance.').trim(),
+    voiceFeedbackBangla: `আপনার আনুমানিক ওভারঅল ব্যান্ড স্কোর ${overall.toFixed(1)}। ${String(parsed?.voiceFeedbackBangla || 'উচ্চারণের স্কোর ৬.০ আপাতত ধরে নেওয়া হয়েছে, কারণ এই রিপোর্টে অডিও-ভিত্তিক উচ্চারণ বিশ্লেষণ করা হয়নি। আপনার রিপোর্টে যে শক্তির দিক এবং উন্নতির অগ্রাধিকার দেখানো হয়েছে, সেগুলো ধরে নিয়মিত অনুশীলন করুন। বিশেষ করে উত্তরকে আরও স্বাভাবিকভাবে বিস্তৃত করা, সঠিক শব্দ বেছে নেওয়া এবং ব্যাকরণে ধারাবাহিকতা বজায় রাখার দিকে মনোযোগ দিন।').trim()}`.trim(),
     evidence: cleanStrings(parsed?.evidence, 8),
     strengths: cleanStrings(parsed?.strengths, 5),
     priorities: cleanStrings(parsed?.priorities, 5),
@@ -425,7 +427,7 @@ export default async function handler(req: any, res: any) {
     const primaryModel = String(runtimeEnv.GEMINI_EVALUATION_MODEL || 'gemini-3.6-flash').trim();
     const fallbackModel = String(runtimeEnv.GEMINI_EVALUATION_FALLBACK_MODEL || 'gemini-3.5-flash').trim();
 
-    const systemInstruction = `You are a strict IELTS Speaking practice evaluator. This is not an official IELTS result.\n\nAssess ONLY the candidate language in the supplied transcript. Score Fluency and Coherence, Lexical Resource, and Grammatical Range and Accuracy from 1.0 to 9.0 in 0.5 increments. Do not assess pronunciation because raw audio is not supplied.\n\nEvery quotation, correction, vocabulary upgrade, strength, priority, and part-level observation must be grounded in the candidate transcript. Do not invent candidate wording. Ignore examiner language when scoring. Do not mechanically score from word count. Use IELTS-style public band distinctions and explain the limiting feature that prevents the next band when relevant.\n\nReturn concise but detailed diagnostic feedback suitable for a learner. Output must conform to the supplied JSON schema.`;
+    const systemInstruction = `You are a strict IELTS Speaking practice evaluator. This is not an official IELTS result.\n\nAssess ONLY the candidate language in the supplied transcript. Score Fluency and Coherence, Lexical Resource, and Grammatical Range and Accuracy from 1.0 to 9.0 in 0.5 increments. Do not assess pronunciation because raw audio is not supplied.\n\nEvery quotation, correction, vocabulary upgrade, strength, priority, and part-level observation must be grounded in the candidate transcript. Do not invent candidate wording. Ignore examiner language when scoring. Do not mechanically score from word count. Use IELTS-style public band distinctions and explain the limiting feature that prevents the next band when relevant.\n\nAlso create voiceFeedbackBangla: a natural spoken coaching summary in Bangladeshi Bangla, about 90-140 words. It should sound like a supportive IELTS teacher speaking directly to the learner. Mention one or two genuine strengths and two or three high-priority improvements grounded in the transcript, plus a practical next step. Do not use markdown, bullet symbols, emojis, headings, or English-only sentences. Do not state the overall band number because the server will prepend the exact calculated overall score. Do not claim pronunciation was assessed; briefly acknowledge that pronunciation is assumed at Band 6.0 because audio pronunciation analysis is not enabled.\n\nReturn concise but detailed diagnostic feedback suitable for a learner. Output must conform to the supplied JSON schema.`;
 
     const compactTranscript = transcript.map((turn: any) => ({
       speaker: turn?.speaker,

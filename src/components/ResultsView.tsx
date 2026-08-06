@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from '../services/routerContext';
 import { MockPracticeService } from '../services/mockService';
 import { IELTSEvaluation, IELTSPracticeSession, RecordingMetadata } from '../types';
 import { RecordingUploadService } from '../services/recordingUploadService';
 import { EvaluationApiService } from '../services/evaluationApiService';
 import { FirebaseRepository } from '../services/firebaseRepository';
+import { VoiceFeedbackService } from '../services/voiceFeedbackService';
 import { 
   AlertTriangle, 
   ArrowLeft, 
@@ -30,7 +31,12 @@ import {
   Sparkles,
   Info,
   Zap,
-  HelpCircle
+  HelpCircle,
+  Volume2,
+  Loader2,
+  Play,
+  Pause,
+  Radio
 } from 'lucide-react';
 
 interface ResultsViewProps {
@@ -62,6 +68,16 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [recordingActionError, setRecordingActionError] = useState<string | null>(null);
   const [showFullTranscript, setShowFullTranscript] = useState(false);
+  const [voiceFeedbackState, setVoiceFeedbackState] = useState<'prompt' | 'loading' | 'ready' | 'declined'>('prompt');
+  const [voiceFeedbackError, setVoiceFeedbackError] = useState<string | null>(null);
+  const [voiceAudioUrl, setVoiceAudioUrl] = useState<string | null>(null);
+  const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+  const [isListeningForVoiceAnswer, setIsListeningForVoiceAnswer] = useState(false);
+  const [voiceAutoplayBlocked, setVoiceAutoplayBlocked] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const promptedEvaluationRef = useRef<string | null>(null);
+  const voicePromptActiveRef = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -156,6 +172,133 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
     };
   }, [sessionId]);
 
+  function stopVoiceAnswerListening() {
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    if (recognition) {
+      try { recognition.stop(); } catch {}
+    }
+    setIsListeningForVoiceAnswer(false);
+  }
+
+  function buildFallbackBanglaFeedback(report: IELTSEvaluation): string {
+    return `আপনার আনুমানিক ওভারঅল ব্যান্ড স্কোর ${report.estimatedOverallBand.toFixed(1)}। ফ্লুয়েন্সি অ্যান্ড কোহেরেন্সে আপনার স্কোর ${report.criteria.fluencyAndCoherence.score.toFixed(1)}, লেক্সিক্যাল রিসোর্সে ${report.criteria.lexicalResource.score.toFixed(1)}, এবং গ্রামাটিক্যাল রেঞ্জ অ্যান্ড অ্যাকিউরেসিতে ${report.criteria.grammaticalRangeAccuracy.score.toFixed(1)}। উচ্চারণের স্কোর ৬.০ আপাতত ধরে নেওয়া হয়েছে, কারণ এই রিপোর্টে অডিও-ভিত্তিক উচ্চারণ বিশ্লেষণ করা হয়নি। এখন আপনার মূল লক্ষ্য হবে উত্তরকে আরও স্বাভাবিকভাবে বিস্তৃত করা, শব্দচয়নে বৈচিত্র্য আনা এবং ব্যাকরণে ধারাবাহিকতা বজায় রাখা। রিপোর্টের প্রায়োরিটি ও সাত দিনের প্র্যাকটিস প্ল্যান অনুসরণ করে নিয়মিত অনুশীলন করুন।`;
+  }
+
+  async function handleVoiceFeedbackAccept() {
+    if (!evaluation || voiceFeedbackState === 'loading') return;
+
+    voicePromptActiveRef.current = false;
+    stopVoiceAnswerListening();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+
+    setVoiceFeedbackError(null);
+    setVoiceAutoplayBlocked(false);
+
+    if (voiceAudioUrl) {
+      setVoiceFeedbackState('ready');
+      window.setTimeout(() => {
+        audioRef.current?.play().catch(() => setVoiceAutoplayBlocked(true));
+      }, 0);
+      return;
+    }
+
+    setVoiceFeedbackState('loading');
+    try {
+      const script = evaluation.voiceFeedbackBangla?.trim() || buildFallbackBanglaFeedback(evaluation);
+      const audioBlob = await VoiceFeedbackService.generateBanglaAudio(script);
+      const nextUrl = URL.createObjectURL(audioBlob);
+      setVoiceAudioUrl((previousUrl) => {
+        if (previousUrl) URL.revokeObjectURL(previousUrl);
+        return nextUrl;
+      });
+      setVoiceFeedbackState('ready');
+    } catch (error: any) {
+      console.error('[ResultsView] Bangla voice feedback error:', error);
+      setVoiceFeedbackError(error?.message || 'Could not generate Bangla voice feedback.');
+      setVoiceFeedbackState('prompt');
+    }
+  }
+
+  function handleVoiceFeedbackDecline() {
+    voicePromptActiveRef.current = false;
+    stopVoiceAnswerListening();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setVoiceFeedbackError(null);
+    setVoiceFeedbackState('declined');
+  }
+
+  function startVoiceAnswerListening() {
+    if (typeof window === 'undefined' || !voicePromptActiveRef.current) return;
+    const RecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!RecognitionCtor) return;
+
+    try {
+      stopVoiceAnswerListening();
+      const recognition = new RecognitionCtor();
+      recognition.lang = 'en-US';
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 3;
+      recognitionRef.current = recognition;
+
+      recognition.onstart = () => setIsListeningForVoiceAnswer(true);
+      recognition.onresult = (event: any) => {
+        const alternatives: string[] = [];
+        for (let i = 0; i < (event?.results?.length || 0); i += 1) {
+          const result = event.results[i];
+          for (let j = 0; j < (result?.length || 0); j += 1) {
+            alternatives.push(String(result[j]?.transcript || '').toLowerCase());
+          }
+        }
+        const heard = alternatives.join(' ');
+        if (/\b(yes|yeah|yep|sure|okay|ok|please|go ahead)\b/i.test(heard)) {
+          void handleVoiceFeedbackAccept();
+        } else if (/\b(no|nope|later|not now|skip)\b/i.test(heard)) {
+          handleVoiceFeedbackDecline();
+        }
+      };
+      recognition.onerror = () => setIsListeningForVoiceAnswer(false);
+      recognition.onend = () => {
+        recognitionRef.current = null;
+        setIsListeningForVoiceAnswer(false);
+      };
+      recognition.start();
+    } catch (error) {
+      console.warn('[ResultsView] Voice yes/no recognition unavailable:', error);
+      setIsListeningForVoiceAnswer(false);
+    }
+  }
+
+  function askForBanglaFeedback() {
+    if (typeof window === 'undefined') return;
+    voicePromptActiveRef.current = true;
+    setVoiceFeedbackState('prompt');
+    setVoiceFeedbackError(null);
+
+    if (!('speechSynthesis' in window)) {
+      startVoiceAnswerListening();
+      return;
+    }
+
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance('Would you like to get the feedback in Bangla?');
+      utterance.lang = 'en-US';
+      utterance.rate = 0.95;
+      utterance.pitch = 1;
+      utterance.onend = () => startVoiceAnswerListening();
+      utterance.onerror = () => startVoiceAnswerListening();
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      startVoiceAnswerListening();
+    }
+  }
+
   const handleSkipRecordingUpload = async () => {
     if (!session) return;
     setRecordingActionError(null);
@@ -186,6 +329,12 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
 
   const handleReEvaluate = async () => {
     if (!session) return;
+    voicePromptActiveRef.current = false;
+    stopVoiceAnswerListening();
+    if (audioRef.current) audioRef.current.pause();
+    setIsVoicePlaying(false);
+    setVoiceFeedbackError(null);
+    setVoiceFeedbackState('prompt');
     setIsActionPending(true);
     try {
       const freshEval = await EvaluationApiService.generateEvaluation(session.id, true, session);
@@ -197,6 +346,46 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
       setIsActionPending(false);
     }
   };
+
+  useEffect(() => {
+    if (!evaluation || evaluation.status === 'failed' || evaluation.status === 'processing' || evaluation.status === 'queued') return;
+    const promptKey = `${evaluation.id}:${evaluation.createdAt}`;
+    if (promptedEvaluationRef.current === promptKey) return;
+    promptedEvaluationRef.current = promptKey;
+
+    const timer = window.setTimeout(() => askForBanglaFeedback(), 800);
+    return () => window.clearTimeout(timer);
+  }, [evaluation?.id, evaluation?.createdAt]);
+
+  useEffect(() => {
+    if (!voiceAudioUrl || voiceFeedbackState !== 'ready') return;
+    const timer = window.setTimeout(() => {
+      audioRef.current?.play()
+        .then(() => setVoiceAutoplayBlocked(false))
+        .catch(() => setVoiceAutoplayBlocked(true));
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [voiceAudioUrl, voiceFeedbackState]);
+
+  useEffect(() => {
+    return () => {
+      voicePromptActiveRef.current = false;
+      const recognition = recognitionRef.current;
+      recognitionRef.current = null;
+      if (recognition) {
+        try { recognition.abort(); } catch {}
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (voiceAudioUrl) URL.revokeObjectURL(voiceAudioUrl);
+    };
+  }, [voiceAudioUrl]);
 
   const toggleGoal = (index: number) => {
     setCompletedGoals(prev => ({
@@ -501,6 +690,132 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
           </span>
         </div>
       </section>
+
+      {/* Conversational Bangla Voice Feedback */}
+      {!isSandboxEvaluation && (
+        <section
+          aria-label="Bangla Voice Feedback"
+          className="border border-[var(--hexa-navy)]/10 bg-gradient-to-br from-white to-[var(--hexa-soft-blue)]/35 rounded-2xl p-5 sm:p-6 shadow-sm space-y-4"
+        >
+          <div className="flex items-start gap-3">
+            <div className="p-2.5 rounded-xl bg-[var(--hexa-navy)] text-white shrink-0">
+              <Volume2 size={18} />
+            </div>
+            <div className="space-y-1 flex-1">
+              <h2 className="text-base font-extrabold text-gray-950">Would you like to get the feedback in Bangla?</h2>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                {(typeof window !== 'undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition))
+                  ? 'You can say “yes” or press Yes.'
+                  : 'Press Yes to hear a short Bangla coaching summary of this report.'}
+              </p>
+            </div>
+          </div>
+
+          {voiceFeedbackState === 'prompt' && (
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                id="bangla-feedback-yes-btn"
+                type="button"
+                onClick={() => void handleVoiceFeedbackAccept()}
+                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[var(--hexa-navy)] text-white rounded-xl text-xs font-bold hover:opacity-90 transition cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--hexa-navy)]/25"
+              >
+                <Play size={14} fill="currentColor" /> Yes
+              </button>
+              <button
+                id="bangla-feedback-no-btn"
+                type="button"
+                onClick={handleVoiceFeedbackDecline}
+                className="inline-flex items-center justify-center px-5 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-xs font-semibold hover:bg-gray-50 transition cursor-pointer"
+              >
+                No
+              </button>
+              {isListeningForVoiceAnswer && (
+                <span className="inline-flex items-center gap-2 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-full px-3 py-1.5" aria-live="polite">
+                  <Radio size={12} className="animate-pulse" /> Listening for “yes” or “no”…
+                </span>
+              )}
+            </div>
+          )}
+
+          {voiceFeedbackState === 'loading' && (
+            <div className="flex items-center gap-3 bg-white/80 border border-gray-100 rounded-xl p-4" aria-live="polite">
+              <Loader2 size={18} className="animate-spin text-[var(--hexa-navy)]" />
+              <div>
+                <p className="text-xs font-bold text-gray-900">Preparing your Bangla voice feedback…</p>
+                <p className="text-[11px] text-gray-500 mt-0.5">The audio will start automatically when it is ready.</p>
+              </div>
+            </div>
+          )}
+
+          {voiceFeedbackState === 'ready' && voiceAudioUrl && (
+            <div className="space-y-3 bg-white/85 border border-gray-100 rounded-xl p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold text-gray-900">Bangla coaching feedback</p>
+                  <p className="text-[11px] text-gray-500">Generated from this IELTS practice assessment.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const audio = audioRef.current;
+                    if (!audio) return;
+                    if (audio.paused) {
+                      audio.play().catch(() => setVoiceAutoplayBlocked(true));
+                    } else {
+                      audio.pause();
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[var(--hexa-navy)] text-white text-xs font-bold cursor-pointer"
+                >
+                  {isVoicePlaying ? <Pause size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" />}
+                  {isVoicePlaying ? 'Pause' : 'Play'}
+                </button>
+              </div>
+              <audio
+                ref={audioRef}
+                src={voiceAudioUrl}
+                controls
+                preload="auto"
+                className="w-full h-10"
+                onPlay={() => { setIsVoicePlaying(true); setVoiceAutoplayBlocked(false); }}
+                onPause={() => setIsVoicePlaying(false)}
+                onEnded={() => setIsVoicePlaying(false)}
+              />
+              {voiceAutoplayBlocked && (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                  Your browser blocked automatic audio. Press Play once to hear the feedback.
+                </p>
+              )}
+            </div>
+          )}
+
+          {voiceFeedbackState === 'declined' && (
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-white/70 border border-gray-100 rounded-xl p-3.5">
+              <p className="text-xs text-gray-600">No problem. You can request it later from this report.</p>
+              <button
+                type="button"
+                onClick={askForBanglaFeedback}
+                className="text-xs font-bold text-[var(--hexa-navy)] hover:underline cursor-pointer"
+              >
+                Ask me again
+              </button>
+            </div>
+          )}
+
+          {voiceFeedbackError && (
+            <div className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl p-3 space-y-2" role="alert">
+              <p className="whitespace-pre-line">{voiceFeedbackError}</p>
+              <button
+                type="button"
+                onClick={() => void handleVoiceFeedbackAccept()}
+                className="font-bold underline cursor-pointer"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+        </section>
+      )}
 
       {isSandboxEvaluation && (
         <section aria-label="Demo Evaluation Warning" className="bg-red-50 border border-red-200 rounded-2xl p-5 text-xs text-red-950 space-y-2">
