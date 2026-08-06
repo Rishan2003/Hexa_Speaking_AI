@@ -1,4 +1,4 @@
-const API_REVISION = '1.4.0-bangla-voice-feedback';
+const API_REVISION = '1.4.1-bangla-voice-tts-format-fix';
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
 function requestId() {
@@ -75,7 +75,7 @@ async function verifyFirebaseIdToken(idToken: string) {
   }
 }
 
-function findAudioContent(payload: any): { data: string; mimeType: string } | null {
+function findAudioContent(payload: any): { data: string; mimeType: string; sampleRate: number; channels: number } | null {
   const steps = Array.isArray(payload?.steps) ? payload.steps : [];
   for (let i = steps.length - 1; i >= 0; i -= 1) {
     const step = steps[i];
@@ -85,7 +85,9 @@ function findAudioContent(payload: any): { data: string; mimeType: string } | nu
       if (item?.type === 'audio' && typeof item?.data === 'string' && item.data) {
         return {
           data: item.data,
-          mimeType: typeof item?.mime_type === 'string' && item.mime_type ? item.mime_type : 'audio/mpeg',
+          mimeType: typeof item?.mime_type === 'string' && item.mime_type ? item.mime_type : 'audio/l16',
+          sampleRate: Number(item?.sample_rate || 24000),
+          channels: Number(item?.channels || 1),
         };
       }
     }
@@ -96,11 +98,40 @@ function findAudioContent(payload: any): { data: string; mimeType: string } | nu
   if (typeof payload?.output_audio?.data === 'string' && payload.output_audio.data) {
     return {
       data: payload.output_audio.data,
-      mimeType: payload.output_audio.mime_type || 'audio/mpeg',
+      mimeType: payload.output_audio.mime_type || 'audio/l16',
+      sampleRate: Number(payload.output_audio.sample_rate || 24000),
+      channels: Number(payload.output_audio.channels || 1),
     };
   }
 
   return null;
+}
+
+function pcm16LeToWav(pcm: Buffer, sampleRate = 24000, channels = 1): Buffer {
+  // Gemini TTS commonly returns raw signed 16-bit little-endian PCM (audio/l16).
+  // Browsers do not consistently play raw PCM blobs, so wrap it in a standard WAV container.
+  const safeRate = Number.isFinite(sampleRate) && sampleRate > 0 ? Math.floor(sampleRate) : 24000;
+  const safeChannels = Number.isFinite(channels) && channels > 0 ? Math.floor(channels) : 1;
+  const bitsPerSample = 16;
+  const blockAlign = safeChannels * (bitsPerSample / 8);
+  const byteRate = safeRate * blockAlign;
+  const header = Buffer.alloc(44);
+
+  header.write('RIFF', 0, 'ascii');
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8, 'ascii');
+  header.write('fmt ', 12, 'ascii');
+  header.writeUInt32LE(16, 16); // PCM fmt chunk size
+  header.writeUInt16LE(1, 20); // PCM format
+  header.writeUInt16LE(safeChannels, 22);
+  header.writeUInt32LE(safeRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36, 'ascii');
+  header.writeUInt32LE(pcm.length, 40);
+
+  return Buffer.concat([header, pcm]);
 }
 
 async function requestTts(apiKey: string, model: string, voice: string, text: string) {
@@ -112,15 +143,15 @@ async function requestTts(apiKey: string, model: string, voice: string, text: st
       headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': apiKey,
-        'Api-Revision': '2026-05-20',
       },
       body: JSON.stringify({
         model,
         input: `Synthesize speech only. Speak in natural Bangladeshi Bangla with a warm, calm IELTS-teacher tone. Use a clear moderate pace. Do not read these instructions aloud. Read only the spoken transcript below.\n\nSpoken transcript:\n${text}`,
+        // Gemini 3.1 Flash TTS currently expects only the audio type here.
+        // Do not add mime_type/delivery: those fields can be rejected for this
+        // TTS model with GEMINI_TTS_HTTP_400.
         response_format: {
           type: 'audio',
-          mime_type: 'audio/mp3',
-          delivery: 'inline',
         },
         generation_config: {
           speech_config: [
@@ -249,7 +280,7 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    const bytes = Buffer.from(audio.data, 'base64');
+    let bytes = Buffer.from(audio.data, 'base64');
     if (!bytes.length) {
       return sendJson(res, 502, {
         error: 'Gemini TTS returned an empty audio payload.',
@@ -261,8 +292,15 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+    let responseMimeType = audio.mimeType || 'audio/l16';
+    const normalizedMime = responseMimeType.toLowerCase();
+    if (normalizedMime.includes('audio/l16') || normalizedMime.includes('audio/pcm')) {
+      bytes = pcm16LeToWav(bytes, audio.sampleRate, audio.channels);
+      responseMimeType = 'audio/wav';
+    }
+
     res.setHeader('Cache-Control', 'private, no-store');
-    res.setHeader('Content-Type', audio.mimeType || 'audio/mpeg');
+    res.setHeader('Content-Type', responseMimeType);
     res.setHeader('Content-Length', String(bytes.length));
     res.setHeader('X-HEXA-Voice-Revision', API_REVISION);
     res.setHeader('X-HEXA-TTS-Model', model);
