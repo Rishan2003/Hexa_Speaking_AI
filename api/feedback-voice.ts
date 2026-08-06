@@ -1,4 +1,4 @@
-const API_REVISION = '1.4.1-bangla-voice-tts-format-fix';
+const API_REVISION = '1.4.2-bangla-voice-generatecontent';
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
 function requestId() {
@@ -76,34 +76,23 @@ async function verifyFirebaseIdToken(idToken: string) {
 }
 
 function findAudioContent(payload: any): { data: string; mimeType: string; sampleRate: number; channels: number } | null {
-  const steps = Array.isArray(payload?.steps) ? payload.steps : [];
-  for (let i = steps.length - 1; i >= 0; i -= 1) {
-    const step = steps[i];
-    if (step?.type !== 'model_output' || !Array.isArray(step?.content)) continue;
-    for (let j = step.content.length - 1; j >= 0; j -= 1) {
-      const item = step.content[j];
-      if (item?.type === 'audio' && typeof item?.data === 'string' && item.data) {
-        return {
-          data: item.data,
-          mimeType: typeof item?.mime_type === 'string' && item.mime_type ? item.mime_type : 'audio/l16',
-          sampleRate: Number(item?.sample_rate || 24000),
-          channels: Number(item?.channels || 1),
-        };
-      }
+  const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
+  for (const candidate of candidates) {
+    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    for (const part of parts) {
+      const inlineData = part?.inlineData || part?.inline_data;
+      if (typeof inlineData?.data !== 'string' || !inlineData.data) continue;
+
+      const mimeType = String(inlineData?.mimeType || inlineData?.mime_type || 'audio/L16;codec=pcm;rate=24000');
+      const rateMatch = mimeType.match(/rate=(\d+)/i);
+      return {
+        data: inlineData.data,
+        mimeType,
+        sampleRate: rateMatch ? Number(rateMatch[1]) : 24000,
+        channels: 1,
+      };
     }
   }
-
-  // Some SDK-shaped gateways expose this convenience property. Keeping this
-  // fallback makes the endpoint tolerant to either response representation.
-  if (typeof payload?.output_audio?.data === 'string' && payload.output_audio.data) {
-    return {
-      data: payload.output_audio.data,
-      mimeType: payload.output_audio.mime_type || 'audio/l16',
-      sampleRate: Number(payload.output_audio.sample_rate || 24000),
-      channels: Number(payload.output_audio.channels || 1),
-    };
-  }
-
   return null;
 }
 
@@ -137,26 +126,34 @@ function pcm16LeToWav(pcm: Buffer, sampleRate = 24000, channels = 1): Buffer {
 async function requestTts(apiKey: string, model: string, voice: string, text: string) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 42_000);
+
   try {
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+    const endpoint =
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': apiKey,
       },
       body: JSON.stringify({
-        model,
-        input: `Synthesize speech only. Speak in natural Bangladeshi Bangla with a warm, calm IELTS-teacher tone. Use a clear moderate pace. Do not read these instructions aloud. Read only the spoken transcript below.\n\nSpoken transcript:\n${text}`,
-        // Gemini 3.1 Flash TTS currently expects only the audio type here.
-        // Do not add mime_type/delivery: those fields can be rejected for this
-        // TTS model with GEMINI_TTS_HTTP_400.
-        response_format: {
-          type: 'audio',
-        },
-        generation_config: {
-          speech_config: [
-            { voice },
-          ],
+        contents: [{
+          parts: [{
+            text:
+              'Speak only the feedback below. Use natural Bangladeshi Bangla, a warm and calm IELTS-teacher tone, and a clear moderate pace. Do not read these instructions aloud.\\n\\n' +
+              text,
+          }],
+        }],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: voice,
+              },
+            },
+          },
         },
       }),
       signal: controller.signal,
@@ -248,8 +245,9 @@ export default async function handler(req: any, res: any) {
     const model = String(runtimeEnv.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview').trim();
     const voice = String(runtimeEnv.GEMINI_TTS_VOICE || 'Kore').trim();
 
-    // Gemini TTS documentation notes a rare transient 500 where text tokens are
-    // returned instead of audio. Retry that specific server-side failure once.
+    // Retry one transient upstream server failure once. The GenerateContent TTS
+    // path avoids the Interactions API response_format validation that caused
+    // repeated audio mime_type HTTP 400 responses.
     let attempt = await requestTts(apiKey, model, voice, text);
     if (attempt.response.status === 500) {
       await new Promise((resolve) => setTimeout(resolve, 350));
