@@ -5,7 +5,7 @@
 
 import { getFirebaseAuth, isFirebaseEnabled } from './firebaseClient';
 
-const VOICE_FEEDBACK_TIMEOUT_MS = 50000;
+const VOICE_FEEDBACK_TIMEOUT_MS = 65000;
 
 export const VoiceFeedbackService = {
   async generateBanglaAudio(text: string): Promise<Blob> {

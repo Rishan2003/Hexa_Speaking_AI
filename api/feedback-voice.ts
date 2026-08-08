@@ -1,4 +1,4 @@
-const API_REVISION = '1.4.2-bangla-voice-generatecontent';
+const API_REVISION = '1.4.3-detailed-bangla-voice';
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
 function requestId() {
@@ -125,7 +125,7 @@ function pcm16LeToWav(pcm: Buffer, sampleRate = 24000, channels = 1): Buffer {
 
 async function requestTts(apiKey: string, model: string, voice: string, text: string) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 42_000);
+  const timeout = setTimeout(() => controller.abort(), 55_000);
 
   try {
     const endpoint =
@@ -141,7 +141,7 @@ async function requestTts(apiKey: string, model: string, voice: string, text: st
         contents: [{
           parts: [{
             text:
-              'Speak only the feedback below. Use natural Bangladeshi Bangla, a warm and calm IELTS-teacher tone, and a clear moderate pace. Do not read these instructions aloud.\\n\\n' +
+              'Read the complete feedback below from beginning to end. Do not summarize, shorten, skip, or paraphrase any part of it. Use natural Bangladeshi Bangla, a warm and calm IELTS-teacher tone, and a clear moderate pace with natural short pauses between ideas. Do not read these instructions aloud.\\n\\n' +
               text,
           }],
         }],
@@ -221,7 +221,7 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    if (text.length > 3200) {
+    if (text.length > 5000) {
       return sendJson(res, 413, {
         error: 'Bangla feedback is too long for a single voice response.',
         code: 'VOICE_FEEDBACK_TEXT_TOO_LONG',

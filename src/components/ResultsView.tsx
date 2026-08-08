@@ -182,7 +182,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
   }
 
   function buildFallbackBanglaFeedback(report: IELTSEvaluation): string {
-    return `আপনার আনুমানিক ওভারঅল ব্যান্ড স্কোর ${report.estimatedOverallBand.toFixed(1)}। ফ্লুয়েন্সি অ্যান্ড কোহেরেন্সে আপনার স্কোর ${report.criteria.fluencyAndCoherence.score.toFixed(1)}, লেক্সিক্যাল রিসোর্সে ${report.criteria.lexicalResource.score.toFixed(1)}, এবং গ্রামাটিক্যাল রেঞ্জ অ্যান্ড অ্যাকিউরেসিতে ${report.criteria.grammaticalRangeAccuracy.score.toFixed(1)}। উচ্চারণের স্কোর ৬.০ আপাতত ধরে নেওয়া হয়েছে, কারণ এই রিপোর্টে অডিও-ভিত্তিক উচ্চারণ বিশ্লেষণ করা হয়নি। এখন আপনার মূল লক্ষ্য হবে উত্তরকে আরও স্বাভাবিকভাবে বিস্তৃত করা, শব্দচয়নে বৈচিত্র্য আনা এবং ব্যাকরণে ধারাবাহিকতা বজায় রাখা। রিপোর্টের প্রায়োরিটি ও সাত দিনের প্র্যাকটিস প্ল্যান অনুসরণ করে নিয়মিত অনুশীলন করুন।`;
+    return `আপনার আনুমানিক ওভারঅল ব্যান্ড স্কোর ${report.estimatedOverallBand.toFixed(1)}। এখন আমি আপনার রিপোর্টটি একটু বিস্তারিতভাবে ব্যাখ্যা করছি। ফ্লুয়েন্সি অ্যান্ড কোহেরেন্সে আপনার স্কোর ${report.criteria.fluencyAndCoherence.score.toFixed(1)}। এই অংশে লক্ষ্য হবে উত্তরকে শুধু ছোট বাক্যে শেষ না করে কারণ, উদাহরণ এবং ফলাফল যোগ করে স্বাভাবিকভাবে বিস্তৃত করা। একই সঙ্গে অতিরিক্ত থেমে যাওয়া, একই ধারণা বারবার বলা এবং সংযোগকারী শব্দের সীমিত ব্যবহার কমাতে হবে। লেক্সিক্যাল রিসোর্সে আপনার স্কোর ${report.criteria.lexicalResource.score.toFixed(1)}। এখানে পরিচিত শব্দের পাশাপাশি একই অর্থ প্রকাশের জন্য আরও নির্ভুল এবং বৈচিত্র্যময় শব্দ ও স্বাভাবিক ফ্রেজ ব্যবহার করার অনুশীলন করুন। গ্রামাটিক্যাল রেঞ্জ অ্যান্ড অ্যাকিউরেসিতে আপনার স্কোর ${report.criteria.grammaticalRangeAccuracy.score.toFixed(1)}। সহজ বাক্য সঠিক রাখার পাশাপাশি কারণ, তুলনা, শর্ত, অতীত অভিজ্ঞতা এবং মতামত বোঝাতে কিছু জটিল বাক্য কাঠামো নিয়মিত ব্যবহার করুন, তবে ভুল বাড়িয়ে নয়। উচ্চারণের স্কোর ৬.০ আপাতত ধরে নেওয়া হয়েছে, কারণ এই রিপোর্টে অডিও-ভিত্তিক উচ্চারণ বিশ্লেষণ চালু নেই; তাই এটিকে প্রকৃত উচ্চারণ মূল্যায়ন হিসেবে ধরবেন না। আপনার শক্তির দিকগুলো ধরে রাখুন, কিন্তু উন্নতির জন্য তিনটি বিষয়কে অগ্রাধিকার দিন: উত্তরকে বেশি বিকশিত করা, শব্দচয়নে বৈচিত্র্য আনা এবং ব্যাকরণে ধারাবাহিক নির্ভুলতা তৈরি করা। আগামী সাত দিন প্রতিদিন একটি স্পিকিং প্রশ্ন নিয়ে এক থেকে দুই মিনিট উত্তর দিন, রেকর্ড শুনে তিনটি দুর্বল বাক্য লিখে ঠিক করুন, পাঁচটি ভালো ফ্রেজ পুনরায় ব্যবহার করুন এবং পরের দিন একই প্রশ্নে আরও উন্নত উত্তর দেওয়ার চেষ্টা করুন। এভাবে নিয়মিত অনুশীলন করলে আপনার উত্তর আরও পরিষ্কার, স্বাভাবিক এবং ব্যান্ড-উপযোগী হবে।`;
   }
 
   async function handleVoiceFeedbackAccept() {
@@ -706,7 +706,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
               <p className="text-xs text-gray-500 leading-relaxed">
                 {(typeof window !== 'undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition))
                   ? 'You can say “yes” or press Yes.'
-                  : 'Press Yes to hear a short Bangla coaching summary of this report.'}
+                  : 'Press Yes to hear a detailed Bangla coaching review of this report.'}
               </p>
             </div>
           </div>
