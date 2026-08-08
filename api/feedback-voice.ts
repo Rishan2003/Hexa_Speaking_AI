@@ -1,4 +1,4 @@
-const API_REVISION = '1.4.3-detailed-bangla-voice';
+const API_REVISION = '1.4.4-chunked-bangla-voice';
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
 function requestId() {
@@ -97,8 +97,6 @@ function findAudioContent(payload: any): { data: string; mimeType: string; sampl
 }
 
 function pcm16LeToWav(pcm: Buffer, sampleRate = 24000, channels = 1): Buffer {
-  // Gemini TTS commonly returns raw signed 16-bit little-endian PCM (audio/l16).
-  // Browsers do not consistently play raw PCM blobs, so wrap it in a standard WAV container.
   const safeRate = Number.isFinite(sampleRate) && sampleRate > 0 ? Math.floor(sampleRate) : 24000;
   const safeChannels = Number.isFinite(channels) && channels > 0 ? Math.floor(channels) : 1;
   const bitsPerSample = 16;
@@ -110,8 +108,8 @@ function pcm16LeToWav(pcm: Buffer, sampleRate = 24000, channels = 1): Buffer {
   header.writeUInt32LE(36 + pcm.length, 4);
   header.write('WAVE', 8, 'ascii');
   header.write('fmt ', 12, 'ascii');
-  header.writeUInt32LE(16, 16); // PCM fmt chunk size
-  header.writeUInt16LE(1, 20); // PCM format
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
   header.writeUInt16LE(safeChannels, 22);
   header.writeUInt32LE(safeRate, 24);
   header.writeUInt32LE(byteRate, 28);
@@ -123,13 +121,26 @@ function pcm16LeToWav(pcm: Buffer, sampleRate = 24000, channels = 1): Buffer {
   return Buffer.concat([header, pcm]);
 }
 
-async function requestTts(apiKey: string, model: string, voice: string, text: string) {
+async function requestTts(
+  apiKey: string,
+  model: string,
+  voice: string,
+  text: string,
+  chunkIndex: number,
+  chunkCount: number
+) {
+  // Keep well below Vercel's 60 second function limit. The browser now sends
+  // short chunks and can retry an individual chunk as a fresh invocation.
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 55_000);
+  const timeout = setTimeout(() => controller.abort(), 36_000);
 
   try {
     const endpoint =
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+
+    const continuityHint = chunkCount > 1
+      ? `This is segment ${chunkIndex + 1} of ${chunkCount} from one continuous coaching review. `
+      : '';
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -141,7 +152,10 @@ async function requestTts(apiKey: string, model: string, voice: string, text: st
         contents: [{
           parts: [{
             text:
-              'Read the complete feedback below from beginning to end. Do not summarize, shorten, skip, or paraphrase any part of it. Use natural Bangladeshi Bangla, a warm and calm IELTS-teacher tone, and a clear moderate pace with natural short pauses between ideas. Do not read these instructions aloud.\\n\\n' +
+              'Read exactly the Bangla feedback below. ' +
+              continuityHint +
+              'Use natural Bangladeshi Bangla, a warm and calm IELTS-teacher tone, a clear moderate pace, and natural short pauses. ' +
+              'Do not summarize, paraphrase, add an introduction, add a conclusion, or read these instructions aloud.\n\n' +
               text,
           }],
         }],
@@ -210,6 +224,8 @@ export default async function handler(req: any, res: any) {
 
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const text = String(body.text || '').replace(/\s+/g, ' ').trim();
+    const chunkIndex = Number.isInteger(body.chunkIndex) && body.chunkIndex >= 0 ? body.chunkIndex : 0;
+    const chunkCount = Number.isInteger(body.chunkCount) && body.chunkCount > 0 ? body.chunkCount : 1;
 
     if (!text) {
       return sendJson(res, 400, {
@@ -221,10 +237,12 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    if (text.length > 5000) {
+    // Long feedback is intentionally sent as several short requests by the
+    // client so no single serverless invocation has to synthesize 2-3 minutes.
+    if (text.length > 900) {
       return sendJson(res, 413, {
-        error: 'Bangla feedback is too long for a single voice response.',
-        code: 'VOICE_FEEDBACK_TEXT_TOO_LONG',
+        error: 'This voice segment is too long. Please send the feedback in smaller chunks.',
+        code: 'VOICE_FEEDBACK_CHUNK_TOO_LONG',
         stage: 'voice_feedback_input',
         requestId: rid,
         apiRevision: API_REVISION,
@@ -245,14 +263,10 @@ export default async function handler(req: any, res: any) {
     const model = String(runtimeEnv.GEMINI_TTS_MODEL || 'gemini-3.1-flash-tts-preview').trim();
     const voice = String(runtimeEnv.GEMINI_TTS_VOICE || 'Kore').trim();
 
-    // Retry one transient upstream server failure once. The GenerateContent TTS
-    // path avoids the Interactions API response_format validation that caused
-    // repeated audio mime_type HTTP 400 responses.
-    let attempt = await requestTts(apiKey, model, voice, text);
-    if (attempt.response.status === 500) {
-      await new Promise((resolve) => setTimeout(resolve, 350));
-      attempt = await requestTts(apiKey, model, voice, text);
-    }
+    // Do not retry inside one Vercel invocation. A retry after a long upstream
+    // delay can itself hit maxDuration. The browser retries only the failed
+    // chunk as a brand-new function call instead.
+    const attempt = await requestTts(apiKey, model, voice, text, chunkIndex, chunkCount);
 
     if (!attempt.response.ok) {
       return sendJson(res, attempt.response.status >= 500 ? 502 : attempt.response.status, {
@@ -263,6 +277,8 @@ export default async function handler(req: any, res: any) {
         requestId: rid,
         apiRevision: API_REVISION,
         ttsModel: model,
+        chunkIndex,
+        chunkCount,
       });
     }
 
@@ -275,6 +291,8 @@ export default async function handler(req: any, res: any) {
         requestId: rid,
         apiRevision: API_REVISION,
         ttsModel: model,
+        chunkIndex,
+        chunkCount,
       });
     }
 
@@ -287,6 +305,8 @@ export default async function handler(req: any, res: any) {
         requestId: rid,
         apiRevision: API_REVISION,
         ttsModel: model,
+        chunkIndex,
+        chunkCount,
       });
     }
 
@@ -302,6 +322,7 @@ export default async function handler(req: any, res: any) {
     res.setHeader('Content-Length', String(bytes.length));
     res.setHeader('X-HEXA-Voice-Revision', API_REVISION);
     res.setHeader('X-HEXA-TTS-Model', model);
+    res.setHeader('X-HEXA-Voice-Chunk', `${chunkIndex + 1}/${chunkCount}`);
     res.setHeader('X-Request-ID', rid);
     return res.status(200).send(bytes);
   } catch (error: any) {
@@ -309,9 +330,9 @@ export default async function handler(req: any, res: any) {
     console.error('[HEXA Bangla voice feedback]', rid, error?.name, error?.message);
     return sendJson(res, timedOut ? 504 : 500, {
       error: timedOut
-        ? 'Bangla voice generation timed out. Please try again.'
+        ? 'This Bangla voice segment timed out. It can be retried separately.'
         : (error?.message || 'The Bangla voice-feedback endpoint encountered an unexpected error.'),
-      code: timedOut ? 'VOICE_FEEDBACK_TIMEOUT' : 'VOICE_FEEDBACK_UNEXPECTED_ERROR',
+      code: timedOut ? 'VOICE_FEEDBACK_CHUNK_TIMEOUT' : 'VOICE_FEEDBACK_UNEXPECTED_ERROR',
       stage: 'voice_feedback',
       requestId: rid,
       apiRevision: API_REVISION,
