@@ -1,4 +1,4 @@
-const API_REVISION = '1.4.4-chunked-bangla-voice';
+const API_REVISION = '1.4.5-quota-aware-bangla-voice';
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
 function requestId() {
@@ -25,6 +25,21 @@ function upstreamMessage(payload: any, fallback: string) {
   if (typeof payload?.error?.message === 'string') return payload.error.message;
   if (typeof payload?.message === 'string') return payload.message;
   return fallback;
+}
+
+function upstreamRetryAfterMs(payload: any): number {
+  const details = Array.isArray(payload?.error?.details) ? payload.error.details : [];
+  for (const detail of details) {
+    const retryDelay = detail?.retryDelay || detail?.retry_delay;
+    if (typeof retryDelay === 'string') {
+      const match = retryDelay.match(/([0-9]+(?:\.[0-9]+)?)s/i);
+      if (match) return Math.ceil(Number(match[1]) * 1000);
+    }
+  }
+
+  const message = upstreamMessage(payload, '');
+  const messageMatch = String(message).match(/retry\s+in\s+([0-9]+(?:\.[0-9]+)?)s/i);
+  return messageMatch ? Math.ceil(Number(messageMatch[1]) * 1000) : 0;
 }
 
 async function verifyFirebaseIdToken(idToken: string) {
@@ -269,11 +284,16 @@ export default async function handler(req: any, res: any) {
     const attempt = await requestTts(apiKey, model, voice, text, chunkIndex, chunkCount);
 
     if (!attempt.response.ok) {
+      const retryAfterMs = upstreamRetryAfterMs(attempt.result.payload);
+      if (attempt.response.status === 429 && retryAfterMs > 0) {
+        res.setHeader('Retry-After', String(Math.max(1, Math.ceil(retryAfterMs / 1000))));
+      }
       return sendJson(res, attempt.response.status >= 500 ? 502 : attempt.response.status, {
         error: upstreamMessage(attempt.result.payload, `Gemini TTS returned HTTP ${attempt.response.status}.`),
         code: attempt.result.payload?.error?.status || `GEMINI_TTS_HTTP_${attempt.response.status}`,
         stage: 'gemini_tts',
         upstreamStatus: attempt.response.status,
+        retryAfterMs,
         requestId: rid,
         apiRevision: API_REVISION,
         ttsModel: model,

@@ -7,8 +7,11 @@ import { getFirebaseAuth, isFirebaseEnabled } from './firebaseClient';
 
 const VOICE_CHUNK_MAX_CHARS = 650;
 const VOICE_CHUNK_TIMEOUT_MS = 45000;
-const VOICE_CHUNK_CONCURRENCY = 2;
+const VOICE_CHUNK_CONCURRENCY = 1;
 const VOICE_CHUNK_RETRIES = 1;
+// Free-tier Gemini TTS can be as low as 10 requests in the active rate-limit window.
+// Keep chunk starts comfortably below that rate while billing is unavailable.
+const VOICE_MIN_CHUNK_START_GAP_MS = 7000;
 
 type WavPart = {
   pcm: Uint8Array;
@@ -214,7 +217,28 @@ async function mergeWavBlobs(blobs: Blob[]): Promise<Blob> {
   return new Blob([output], { type: 'audio/wav' });
 }
 
-async function readErrorResponse(response: Response): Promise<Error> {
+type VoiceHttpError = Error & {
+  status?: number;
+  retryAfterMs?: number;
+};
+
+function parseRetryDelayMs(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return Math.ceil(value);
+  const text = String(value || '').trim();
+  if (!text) return 0;
+
+  const milliseconds = text.match(/([0-9]+(?:\.[0-9]+)?)\s*ms/i);
+  if (milliseconds) return Math.ceil(Number(milliseconds[1]) || 0);
+
+  const seconds = text.match(/([0-9]+(?:\.[0-9]+)?)\s*s(?:ec(?:ond)?s?)?/i);
+  if (seconds) return Math.ceil((Number(seconds[1]) || 0) * 1000);
+
+  const numericSeconds = Number(text);
+  if (Number.isFinite(numericSeconds) && numericSeconds >= 0) return Math.ceil(numericSeconds * 1000);
+  return 0;
+}
+
+async function readErrorResponse(response: Response): Promise<VoiceHttpError> {
   const contentType = response.headers.get('content-type') || '';
   const errorData = contentType.includes('application/json')
     ? await response.json().catch(() => ({} as any))
@@ -225,7 +249,16 @@ async function readErrorResponse(response: Response): Promise<Error> {
   const suffix = [code ? `Code: ${code}` : '', requestId ? `Request ID: ${requestId}` : '']
     .filter(Boolean)
     .join(' · ');
-  return new Error(suffix ? `${baseMessage}\n${suffix}` : baseMessage);
+
+  const retryHeaderMs = parseRetryDelayMs(response.headers.get('Retry-After'));
+  const retryBodyMs = parseRetryDelayMs(errorData.retryAfterMs);
+  const retryMessageMatch = String(baseMessage).match(/retry\s+in\s+([0-9]+(?:\.[0-9]+)?)s/i);
+  const retryMessageMs = retryMessageMatch ? Math.ceil(Number(retryMessageMatch[1]) * 1000) : 0;
+
+  const error = new Error(suffix ? `${baseMessage}\n${suffix}` : baseMessage) as VoiceHttpError;
+  error.status = response.status;
+  error.retryAfterMs = Math.max(retryHeaderMs, retryBodyMs, retryMessageMs);
+  return error;
 }
 
 async function fetchVoiceChunk(
@@ -253,7 +286,10 @@ async function fetchVoiceChunk(
       const error = await readErrorResponse(response);
       const retryable = response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504;
       if (retryable && retriesLeft > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        const retryDelayMs = response.status === 429
+          ? Math.max(error.retryAfterMs || 0, VOICE_MIN_CHUNK_START_GAP_MS) + 750
+          : 1000;
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
         return fetchVoiceChunk(token, text, chunkIndex, chunkCount, retriesLeft - 1);
       }
       throw error;
@@ -281,12 +317,25 @@ async function fetchVoiceChunk(
 async function generateChunksWithLimit(token: string, chunks: string[]): Promise<Blob[]> {
   const results = new Array<Blob>(chunks.length);
   let nextIndex = 0;
+  let lastChunkStartedAt = 0;
+
+  async function waitForRequestPacing() {
+    const elapsed = Date.now() - lastChunkStartedAt;
+    const waitMs = lastChunkStartedAt > 0
+      ? Math.max(0, VOICE_MIN_CHUNK_START_GAP_MS - elapsed)
+      : 0;
+    if (waitMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+    lastChunkStartedAt = Date.now();
+  }
 
   async function worker() {
     while (true) {
       const index = nextIndex;
       nextIndex += 1;
       if (index >= chunks.length) return;
+      await waitForRequestPacing();
       results[index] = await fetchVoiceChunk(token, chunks[index], index, chunks.length);
     }
   }
