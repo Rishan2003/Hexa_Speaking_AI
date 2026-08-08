@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdmin';
+import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdminLazy';
 import {
   adminGrantCredits,
   adminSetBalance,
@@ -19,7 +19,7 @@ import {
   type TestPackageRecord,
 } from './_billing';
 
-const API_REVISION = '1.2.0-paid-access';
+const API_REVISION = '1.2.1-paid-access-bootstrap-fix';
 
 function setCommonHeaders(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
@@ -67,8 +67,17 @@ async function verifyUser(req: any) {
     throw error;
   }
   const token = authorization.slice('Bearer '.length).trim();
+  let auth: any;
   try {
-    const { auth } = ensureSessionFirebaseAdmin();
+    ({ auth } = await ensureSessionFirebaseAdmin());
+  } catch (cause: any) {
+    const error: any = new Error(`Firebase Admin could not initialize: ${String(cause?.message || cause)}`);
+    error.httpStatus = 500;
+    error.publicCode = 'FIREBASE_ADMIN_INIT_FAILED';
+    error.cause = cause;
+    throw error;
+  }
+  try {
     return await auth.verifyIdToken(token);
   } catch (cause: any) {
     const error: any = new Error('Your sign-in session could not be verified.');
@@ -81,7 +90,7 @@ async function verifyUser(req: any) {
 
 async function userIsAdmin(decoded: any): Promise<boolean> {
   if (decoded?.admin === true || decoded?.role === 'admin') return true;
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const profile = await db.collection('users').doc(decoded.uid).get();
   return profile.exists && (profile.data()?.role === 'admin' || profile.data()?.admin === true);
 }
@@ -199,7 +208,7 @@ async function validateSslcommerzPayment(orderId: string, valId: string) {
   }
   if (String(payload?.tran_id || '') !== orderId) throw new Error('Payment transaction ID does not match the order.');
 
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const orderSnap = await db.collection('paymentOrders').doc(orderId).get();
   if (!orderSnap.exists) throw new Error('Payment order was not found.');
   const order = orderSnap.data() as any;
@@ -296,7 +305,7 @@ export default async function handler(req: any, res: any) {
       if (!settings.developmentPaymentsEnabled) return res.status(403).json({ error: 'Development payments are disabled.', code: 'DEV_PAYMENTS_DISABLED' });
       const body = parseBody(req);
       const orderId = String(body.orderId || '');
-      const { db } = ensureSessionFirebaseAdmin();
+      const { db } = await ensureSessionFirebaseAdmin();
       const snap = await db.collection('paymentOrders').doc(orderId).get();
       if (!snap.exists || snap.data()?.userId !== decoded.uid || snap.data()?.provider !== 'development') {
         return res.status(404).json({ error: 'Development order was not found.', code: 'ORDER_NOT_FOUND' });
@@ -326,7 +335,7 @@ export default async function handler(req: any, res: any) {
       const sessionId = String(body.sessionId || '');
       if (!sessionId) return res.status(400).json({ error: 'sessionId is required.', code: 'SESSION_ID_REQUIRED' });
 
-      const { db } = ensureSessionFirebaseAdmin();
+      const { db } = await ensureSessionFirebaseAdmin();
       const [reservationSnap, sessionSnap] = await Promise.all([
         db.collection('testReservations').doc(sessionId).get(),
         db.collection('speakingSessions').doc(sessionId).get(),
@@ -357,7 +366,7 @@ export default async function handler(req: any, res: any) {
 
     if (path === 'admin/overview' && req.method === 'GET') {
       await requireAdmin(req);
-      const { db } = ensureSessionFirebaseAdmin();
+      const { db } = await ensureSessionFirebaseAdmin();
       const [settings, packages, usersSnap, ordersSnap] = await Promise.all([
         getBillingSettings(),
         listAllPackages(),
@@ -390,7 +399,7 @@ export default async function handler(req: any, res: any) {
         updatedAt: Date.now(),
         updatedBy: admin.uid,
       };
-      const { db } = ensureSessionFirebaseAdmin();
+      const { db } = await ensureSessionFirebaseAdmin();
       await db.collection('billingSettings').doc('global').set(next, { merge: true });
       return res.status(200).json({ settings: next });
     }
@@ -416,7 +425,7 @@ export default async function handler(req: any, res: any) {
         createdAt: Number(body.createdAt) || now,
         updatedAt: now,
       };
-      const { db } = ensureSessionFirebaseAdmin();
+      const { db } = await ensureSessionFirebaseAdmin();
       await db.collection('testPackages').doc(id).set({ ...pkg, updatedBy: admin.uid }, { merge: true });
       return res.status(200).json({ package: pkg });
     }

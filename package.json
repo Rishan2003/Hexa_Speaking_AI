@@ -1,7 +1,7 @@
 {
   "name": "speakready-ielts",
   "private": true,
-  "version": "1.1.8-vercel-function-trace-fix",
+  "version": "1.2.1-paid-tests-bootstrap-fix",
   "type": "module",
   "scripts": {
     "dev": "tsx watch server.ts",

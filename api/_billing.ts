@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdmin';
+import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdminLazy';
 
 export type AccessType = 'credits' | 'unlimited';
 export type PaymentProvider = 'development' | 'sslcommerz';
@@ -59,7 +59,7 @@ export function isUnlimitedActive(entitlement: Partial<TestEntitlementRecord> | 
 }
 
 export async function getBillingSettings(): Promise<BillingSettingsRecord> {
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const ref = db.collection('billingSettings').doc('global');
   const snap = await ref.get();
   if (snap.exists) {
@@ -80,7 +80,7 @@ export async function getBillingSettings(): Promise<BillingSettingsRecord> {
 }
 
 export async function ensureDefaultPackages(): Promise<void> {
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const snapshot = await db.collection('testPackages').limit(1).get();
   if (!snapshot.empty) return;
 
@@ -149,7 +149,7 @@ export async function ensureDefaultPackages(): Promise<void> {
 
 export async function listActivePackages(): Promise<TestPackageRecord[]> {
   await ensureDefaultPackages();
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const snapshot = await db.collection('testPackages').get();
   return snapshot.docs
     .map((doc) => ({ id: doc.id, ...(doc.data() as any) } as TestPackageRecord))
@@ -159,7 +159,7 @@ export async function listActivePackages(): Promise<TestPackageRecord[]> {
 
 export async function listAllPackages(): Promise<TestPackageRecord[]> {
   await ensureDefaultPackages();
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const snapshot = await db.collection('testPackages').get();
   return snapshot.docs
     .map((doc) => ({ id: doc.id, ...(doc.data() as any) } as TestPackageRecord))
@@ -167,7 +167,7 @@ export async function listAllPackages(): Promise<TestPackageRecord[]> {
 }
 
 export async function ensureEntitlement(userId: string): Promise<TestEntitlementRecord> {
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const entitlementRef = db.collection('testEntitlements').doc(userId);
   const settingsRef = db.collection('billingSettings').doc('global');
 
@@ -213,7 +213,7 @@ export async function ensureEntitlement(userId: string): Promise<TestEntitlement
 }
 
 export async function releaseExpiredReservationsForUser(userId: string): Promise<void> {
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const snapshot = await db.collection('testReservations').where('userId', '==', userId).get();
   const now = Date.now();
   const expired = snapshot.docs
@@ -229,7 +229,7 @@ export async function getEntitlement(userId: string): Promise<TestEntitlementRec
   await releaseExpiredReservationsForUser(userId).catch(() => undefined);
   const entitlement = await ensureEntitlement(userId);
   if (entitlement.unlimited && entitlement.unlimitedUntil != null && entitlement.unlimitedUntil <= Date.now()) {
-    const { db } = ensureSessionFirebaseAdmin();
+    const { db } = await ensureSessionFirebaseAdmin();
     await db.collection('testEntitlements').doc(userId).set({ unlimited: false, unlimitedUntil: null, updatedAt: Date.now() }, { merge: true });
     return { ...entitlement, unlimited: false, unlimitedUntil: null, updatedAt: Date.now() };
   }
@@ -246,7 +246,7 @@ function paymentRequiredError() {
 export async function reserveTestCredit(userId: string, sessionId: string, mode: string) {
   await releaseExpiredReservationsForUser(userId).catch(() => undefined);
   await ensureEntitlement(userId);
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const entitlementRef = db.collection('testEntitlements').doc(userId);
   const reservationRef = db.collection('testReservations').doc(sessionId);
   const ledgerRef = db.collection('entitlementLedger').doc(`reserve-${sessionId}`);
@@ -303,7 +303,7 @@ export async function reserveTestCredit(userId: string, sessionId: string, mode:
 }
 
 export async function consumeReservation(userId: string, sessionId: string) {
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const entitlementRef = db.collection('testEntitlements').doc(userId);
   const reservationRef = db.collection('testReservations').doc(sessionId);
   const ledgerRef = db.collection('entitlementLedger').doc(`consume-${sessionId}`);
@@ -351,7 +351,7 @@ export async function consumeReservation(userId: string, sessionId: string) {
 }
 
 export async function releaseReservation(userId: string, sessionId: string, note = 'Test startup failed before connection.') {
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const entitlementRef = db.collection('testEntitlements').doc(userId);
   const reservationRef = db.collection('testReservations').doc(sessionId);
   const ledgerRef = db.collection('entitlementLedger').doc(`release-${sessionId}`);
@@ -385,7 +385,7 @@ export async function releaseReservation(userId: string, sessionId: string, note
 }
 
 export async function recentOrdersForUser(userId: string, limit = 10) {
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const snapshot = await db.collection('paymentOrders').where('userId', '==', userId).get();
   return snapshot.docs
     .map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
@@ -394,7 +394,7 @@ export async function recentOrdersForUser(userId: string, limit = 10) {
 }
 
 export async function createPaymentOrder(userId: string, packageRecord: TestPackageRecord, provider: PaymentProvider) {
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const now = Date.now();
   const orderId = `HEXA-${new Date(now).toISOString().slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 8).toUpperCase()}`;
   const order = {
@@ -420,12 +420,12 @@ export async function createPaymentOrder(userId: string, packageRecord: TestPack
 }
 
 export async function markOrderStatus(orderId: string, status: string, metadata: Record<string, unknown> = {}) {
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   await db.collection('paymentOrders').doc(orderId).set({ status, updatedAt: Date.now(), ...metadata }, { merge: true });
 }
 
 export async function applyPaidOrder(orderId: string, providerMetadata: Record<string, unknown> = {}) {
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const orderRef = db.collection('paymentOrders').doc(orderId);
   const orderSnap = await orderRef.get();
   if (!orderSnap.exists) {
@@ -491,7 +491,7 @@ export async function applyPaidOrder(orderId: string, providerMetadata: Record<s
 export async function adminGrantCredits(adminUid: string, userId: string, amount: number, note?: string) {
   const safeAmount = Math.max(1, Math.floor(Number(amount) || 0));
   await ensureEntitlement(userId);
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const ref = db.collection('testEntitlements').doc(userId);
   const now = Date.now();
   const ledgerId = `admin-grant-${randomUUID()}`;
@@ -521,7 +521,7 @@ export async function adminGrantCredits(adminUid: string, userId: string, amount
 export async function adminSetBalance(adminUid: string, userId: string, targetBalance: number, note?: string) {
   const safeBalance = Math.max(0, Math.floor(Number(targetBalance) || 0));
   await ensureEntitlement(userId);
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const ref = db.collection('testEntitlements').doc(userId);
   const now = Date.now();
   const ledgerId = `admin-set-${randomUUID()}`;
@@ -547,7 +547,7 @@ export async function adminSetBalance(adminUid: string, userId: string, targetBa
 
 export async function adminSetUnlimited(adminUid: string, userId: string, enabled: boolean, until: number | null, note?: string) {
   await ensureEntitlement(userId);
-  const { db } = ensureSessionFirebaseAdmin();
+  const { db } = await ensureSessionFirebaseAdmin();
   const ref = db.collection('testEntitlements').doc(userId);
   const now = Date.now();
   const unlimitedUntil = enabled ? (until && until > now ? until : null) : null;

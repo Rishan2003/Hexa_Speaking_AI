@@ -1,0 +1,10 @@
+Changed files from v1.2.0 -> v1.2.1
+
+Modified:
+- api/_billing.ts
+- api/billing.ts
+- package.json
+
+Added:
+- BILLING_BOOTSTRAP_FIX_v1.2.1.md
+- api/_firebaseSessionAdminLazy.ts
