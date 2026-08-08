@@ -63,9 +63,9 @@ service cloud.firestore {
     // 5. Speaking Sessions Collection
     match /speakingSessions/{sessionId} {
       allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() 
-        && request.resource.data.userId == request.auth.uid
-        && !request.resource.data.keys().hasAny(['selectedTestSnapshot']); // Force server-side creation for snapshots
+      // Paid sessions are server-created only. Client SDKs may update an already
+      // authorized session, but they cannot create a new session and bypass billing.
+      allow create: if false;
       allow update: if isAuthenticated() 
         && (resource.data.userId == request.auth.uid || isAdmin())
         && request.resource.data.userId == resource.data.userId // Prevent hijacking session to another user
@@ -118,6 +118,28 @@ service cloud.firestore {
       allow read: if isOwner(userId) || isAdmin();
       allow create, update: if isAdmin(); // Read-only for standard users; updated via secure server endpoints
       allow delete: if isAdmin();
+    }
+
+    // 12. Paid Test Access / Billing Collections
+    // All mutations and sensitive reads go through Firebase Admin on server APIs.
+    // Students cannot forge balances, packages, reservations, payment status or ledger entries.
+    match /billingSettings/{docId} {
+      allow read, write: if false;
+    }
+    match /testEntitlements/{userId} {
+      allow read, write: if false;
+    }
+    match /testPackages/{packageId} {
+      allow read, write: if false;
+    }
+    match /paymentOrders/{orderId} {
+      allow read, write: if false;
+    }
+    match /testReservations/{reservationId} {
+      allow read, write: if false;
+    }
+    match /entitlementLedger/{entryId} {
+      allow read, write: if false;
     }
   }
 }

@@ -13,13 +13,74 @@ export type RoutePath =
   | '/practice' // generic base
   | '/results'  // generic base
   | '/history'
+  | '/billing'
   | '/settings'
   | '/privacy'
-  | '/admin';
+  | '/admin'
+  | '/admin/billing';
 
 export interface Route {
   path: RoutePath;
   params?: Record<string, string>;
+}
+
+
+// Paid test access / billing
+export type TestAccessType = 'credits' | 'unlimited';
+export type PaymentProvider = 'development' | 'sslcommerz';
+
+export interface TestEntitlement {
+  userId: string;
+  creditBalance: number;
+  unlimited: boolean;
+  unlimitedUntil: number | null;
+  totalPurchased: number;
+  totalGranted: number;
+  totalConsumed: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TestPackage {
+  id: string;
+  name: string;
+  description: string;
+  accessType: TestAccessType;
+  tests: number;
+  unlimitedDays: number | null;
+  priceBdt: number;
+  active: boolean;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface BillingSettings {
+  signupFreeTests: number;
+  currency: 'BDT';
+  developmentPaymentsEnabled: boolean;
+  activeProvider: PaymentProvider;
+  updatedAt: number;
+}
+
+export interface PaymentOrder {
+  id: string;
+  userId: string;
+  packageId: string;
+  packageSnapshot: {
+    name: string;
+    accessType: TestAccessType;
+    tests: number;
+    unlimitedDays: number | null;
+    priceBdt: number;
+  };
+  amountBdt: number;
+  currency: 'BDT';
+  provider: PaymentProvider;
+  status: 'pending' | 'paid' | 'failed' | 'cancelled' | 'review';
+  createdAt: number;
+  updatedAt: number;
+  paidAt?: number;
 }
 
 // User Profile
@@ -184,6 +245,7 @@ export interface IELTSPracticeSession {
   evaluationId?: string;
   recordingMetadata?: RecordingMetadata;
   providerMetadata?: ProviderMetadata;
+  billingReservationId?: string;
 }
 
 // IELTS Detailed Criteria

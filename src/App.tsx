@@ -6,6 +6,7 @@
 import React from 'react';
 import { RouterProvider } from './services/routerContext';
 import { AuthProvider } from './services/authContext';
+import { BillingProvider } from './services/billingContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { NavigationShell } from './components/NavigationShell';
 
@@ -13,9 +14,11 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <RouterProvider>
-          <NavigationShell />
-        </RouterProvider>
+        <BillingProvider>
+          <RouterProvider>
+            <NavigationShell />
+          </RouterProvider>
+        </BillingProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

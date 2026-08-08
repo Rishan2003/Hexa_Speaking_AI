@@ -41,7 +41,11 @@ function parseLocation(): Route {
     '/dashboard',
     '/practice/setup',
     '/history',
+    '/billing',
     '/settings',
+    '/privacy',
+    '/admin',
+    '/admin/billing',
   ];
 
   if (validPaths.includes(path as RoutePath)) {

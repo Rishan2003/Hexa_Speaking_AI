@@ -89,6 +89,7 @@ export class GeminiLiveAdapter implements RealtimeVoiceProvider {
           'Content-Type': 'application/json',
           ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
         },
+        body: JSON.stringify({ sessionId: this.config?.sessionId || '' }),
       });
 
       const responseBody = await response.json().catch(() => ({}));

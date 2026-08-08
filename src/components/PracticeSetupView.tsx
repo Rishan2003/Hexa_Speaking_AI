@@ -7,8 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from '../services/routerContext';
 import { useAuth } from '../services/authContext';
 import { MockPracticeService } from '../services/mockService';
-import { isFirebaseEnabled } from '../services/firebaseClient';
-import { FirebaseRepository } from '../services/firebaseRepository';
+import { getFirebaseIdToken } from '../services/firebaseClient';
 import { CUE_CARDS_BANK, generateTestSnapshot } from '../services/questionBank';
 import { APP_CONFIG } from '../config';
 import { 
@@ -315,45 +314,45 @@ export const PracticeSetupView: React.FC = () => {
         return;
       }
 
-      // Vercel-safe launch path: session creation no longer depends on /api/session/create.
-      // The question snapshot is deterministic and can be generated locally; Firebase persistence
-      // is best-effort and the full snapshot is always mirrored to local recovery storage.
+      // Paid production path: every new test must be authorized server-side.
       if (!user?.uid) {
         throw new Error('Your sign-in session has expired. Please sign in again.');
       }
 
       const card = CUE_CARDS_BANK.find(c => c.id === selectedCueCardId) || CUE_CARDS_BANK[0];
       const seed = `seed-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-      const snapshot = generateTestSnapshot(
-        seed,
-        selectedMode,
-        selectedMode === 'part1' ? undefined : card.id
-      );
-
-      const newSession = MockPracticeService.createSession(
-        card.title,
-        selectedMode === 'part1' ? undefined : card.id,
-        snapshot
-      );
-      newSession.userId = user.uid;
-      MockPracticeService.upsertSession(newSession);
-
-      if (isFirebaseEnabled()) {
-        try {
-          await FirebaseRepository.createSpeakingSession(newSession);
-        } catch (persistenceError) {
-          // Do not block a speaking session because Firestore is temporarily unavailable.
-          console.warn('[PracticeSetup] Firestore session persistence degraded; continuing with local recovery copy.', persistenceError);
-        }
+      const idToken = await getFirebaseIdToken();
+      const response = await fetch('/api/session/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
+        body: JSON.stringify({
+          mode: selectedMode,
+          seed,
+          cueCardId: selectedMode === 'part1' ? undefined : card.id,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const launchError: any = new Error(payload?.error || `Could not create test (${response.status}).`);
+        launchError.code = payload?.code;
+        launchError.status = response.status;
+        throw launchError;
       }
 
-      // Stop precheck audio streams immediately before launching to avoid hardware conflicts!
+      MockPracticeService.upsertSession(payload);
       stopMicrophoneStream();
-      navigate('/practice', { sessionId: newSession.id });
+      navigate('/practice', { sessionId: payload.id });
     } catch (err: any) {
       console.error('Error starting speaking session:', err);
-
-      setPrecheckError(err.message || 'Could not create a secure practice session. Please sign in again and retry.');
+      if (err?.code === 'PAYMENT_REQUIRED' || err?.status === 402) {
+        setPrecheckError('You have no speaking tests remaining. Choose a package to continue.');
+        navigate('/billing');
+      } else {
+        setPrecheckError(err.message || 'Could not create a secure practice session. Please sign in again and retry.');
+      }
     } finally {
       setLaunching(false);
     }

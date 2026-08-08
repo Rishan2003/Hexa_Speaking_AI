@@ -20,6 +20,9 @@ import { MockPracticeService } from '../src/services/mockService';
 import { ServerLogger } from '../src/services/serverLogger';
 import { checkEndpointRateLimit, checkAndIncrementUserLimit } from '../src/services/serverLimitsService';
 import { validateEnvironmentVariables } from '../src/services/envValidation';
+import sessionCreateHandler from './session-create';
+import sessionMintHandler from './session-mint';
+import billingHandler from './billing';
 
 // Load local overrides first, then shared defaults. Local files remain git-ignored.
 dotenv.config({ path: '.env.local', quiet: true });
@@ -72,6 +75,7 @@ async function createApp() {
   }
 
   app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
   // Middleware 1: HTTP Security Headers & CORS Handling
   app.use((req, res, next) => {
@@ -205,249 +209,28 @@ async function createApp() {
       warnings: [
         ...envReport.warnings,
         ...(!firestoreReachable && envReport.firebaseServerConfigured
-          ? [`Firebase Admin is configured, but Firestore probe status is: ${firestoreStatus}. Session creation will use recovery mode until Firestore is reachable.`]
+          ? [`Firebase Admin is configured, but Firestore probe status is: ${firestoreStatus}. Paid session creation is blocked until authoritative Firestore persistence is reachable.`]
           : [])
       ]
     });
   });
 
-  // API ROUTE 2: Secure Server-Only Session Creation with Test Snapshot Selection
-  app.post('/api/session/create', async (req: any, res: any) => {
-    const startTime = Date.now();
-    let stage = 'request';
-    try {
-      ServerLogger.info('Session creation request received', {
-        requestId: req.requestId,
-        mode: req.body?.mode ?? 'full',
-        vercel: Boolean(process.env.VERCEL),
-      });
+  // API ROUTE 2: Paid, server-authorized speaking-session creation.
+  // Reuse the same handler as the Vercel Function so local development cannot
+  // accidentally bypass entitlement checks or use the old free-session fallback.
+  app.post('/api/session/create', (req: any, res: any) => sessionCreateHandler(req, res));
 
-      stage = 'authentication';
-      const userId = await resolveRequestUserId(req, res);
-      if (!userId) return;
-
-      stage = 'request_validation';
-      const requestedMode = req.body?.mode ?? 'full';
-      if (!['full', 'part1', 'part2', 'part3'].includes(requestedMode)) {
-        return res.status(400).json({ error: 'Invalid mode. Expected full, part1, part2, or part3.', code: 'INVALID_SESSION_MODE', requestId: req.requestId });
-      }
-
-      const seed = typeof req.body?.seed === 'string' && req.body.seed.length <= 200
-        ? req.body.seed
-        : `seed-${randomUUID()}`;
-      const cueCardId = typeof req.body?.cueCardId === 'string' ? req.body.cueCardId : undefined;
-
-      stage = 'quota_check';
-      const limitCheck = await checkAndIncrementUserLimit(userId, 'session');
-      if (!limitCheck.allowed) {
-        return res.status(429).json({ error: limitCheck.message, code: 'SESSION_DAILY_LIMIT', requestId: req.requestId });
-      }
-
-      stage = 'test_generation';
-      const snapshot = generateTestSnapshot(seed, requestedMode, cueCardId);
-
-      const sessionId = `session-${randomUUID()}`;
-      const newSession = {
-        id: sessionId,
-        userId,
-        createdAt: Date.now(),
-        status: 'active',
-        currentPart: requestedMode === 'part3'
-          ? 'PART_3'
-          : requestedMode === 'part2'
-            ? 'PART_2'
-            : 'PART_1',
-        currentState: 'IDLE',
-        topic: snapshot.part2CueCard?.title || snapshot.part1Topic?.title || 'Speaking Practice',
-        cueCard: snapshot.part2CueCard ? {
-          id: snapshot.part2CueCard.id,
-          topic: snapshot.part2CueCard.taskStatement,
-          bulletPoints: snapshot.part2CueCard.bulletPrompts,
-          followUpQuestions: snapshot.part3Questions ? snapshot.part3Questions.map(q => q.text) : []
-        } : undefined,
-        transcript: [],
-        selectedTestSnapshot: snapshot,
-        updatedAt: Date.now()
-      };
-
-      let persistenceMode: 'firestore' | 'recovery' = 'recovery';
-
-      // Firestore persistence is important, but it must not prevent an authenticated
-      // student from launching a test. Browser persistence and the evaluation
-      // sessionEvidence payload provide recovery while deployment credentials are fixed.
-      stage = 'firestore_persistence';
-      if (isFirestoreServerAvailable()) {
-        try {
-          const db = getFirebaseAdmin().firestore();
-          await db.collection('speakingSessions').doc(sessionId).set(newSession);
-
-          const batch = db.batch();
-          const parts = [
-            { id: 'part-1', sessionId, partIndex: 1, status: 'idle', startedAt: Date.now() },
-            { id: 'part-2', sessionId, partIndex: 2, status: 'idle', startedAt: Date.now() },
-            { id: 'part-3', sessionId, partIndex: 3, status: 'idle', startedAt: Date.now() }
-          ];
-          parts.forEach((part) => {
-            const partRef = db.collection('speakingSessions').doc(sessionId).collection('parts').doc(part.id);
-            batch.set(partRef, part);
-          });
-          await batch.commit();
-          persistenceMode = 'firestore';
-        } catch (firestoreError: any) {
-          // Suppress known transient/database errors when possible, but recover for
-          // every Firestore RPC failure here. Authentication has already succeeded;
-          // failing the entire speaking test because persistence is degraded is worse
-          // than returning the authenticated session with an explicit recovery mode.
-          markFirestoreServerUnavailable(firestoreError);
-          ServerLogger.warn('Server Firestore persistence failed during session creation; continuing in recovery mode.', {
-            requestId: req.requestId,
-            sessionId,
-            userId,
-            code: firestoreError?.code,
-            error: firestoreError?.message,
-          });
-        }
-      }
-
-      stage = 'recovery_cache';
-      MockPracticeService.upsertSession(newSession as any);
-
-      res.setHeader('X-SpeakReady-Persistence', persistenceMode);
-      res.setHeader('X-SpeakReady-Request-ID', req.requestId);
-
-      ServerLogger.info('Speaking session created', {
-        requestId: req.requestId,
-        sessionId,
-        userId,
-        persistenceMode,
-        latencyMs: Date.now() - startTime
-      });
-
-      return res.status(201).json({
-        ...newSession,
-        serverPersistence: persistenceMode,
-      });
-    } catch (err: any) {
-      ServerLogger.error('Session creation failed', 'SESSION_CREATE_FAILED', {
-        requestId: req.requestId,
-        stage,
-        code: err?.code,
-        error: err?.message || 'Unknown error',
-      });
-
-      return res.status(500).json({
-        error: `Session creation failed during ${stage}.`,
-        code: 'SESSION_CREATE_FAILED',
-        stage,
-        requestId: req.requestId,
-      });
-    }
+  // Billing API uses one Vercel function with a path parameter. Mirror that
+  // routing shape locally for identical development and production behavior.
+  app.all('/api/billing/*', (req: any, res: any) => {
+    req.query = { ...(req.query || {}), path: req.params[0] || '' };
+    return billingHandler(req, res);
   });
 
-  // API ROUTE 3: Secure Session Token Minting for Gemini Live WebSockets
-  app.post('/api/session/mint', async (req: any, res: any, next: any) => {
-    const startTime = Date.now();
-    try {
-      let userId = 'sandbox-user';
-      const authHeader = req.headers.authorization;
-
-      if (!isFirebaseServerEnabled() && process.env.NODE_ENV === 'production') {
-        return res.status(503).json({
-          error: 'Live token minting is disabled until Firebase Admin authentication is configured.',
-          code: 'AUTH_NOT_CONFIGURED',
-        });
-      }
-
-      if (isFirebaseServerEnabled()) {
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-          return res.status(401).json({ error: 'Authentication is required to start a live voice session.' });
-        }
-
-        try {
-          const idToken = authHeader.slice('Bearer '.length).trim();
-          const decoded = await getFirebaseAdmin().auth().verifyIdToken(idToken);
-          userId = decoded.uid;
-        } catch (authErr) {
-          ServerLogger.warn('Live token minting rejected due to an invalid Firebase ID token', {
-            requestId: req.requestId,
-            error: (authErr as Error).message,
-          });
-          return res.status(401).json({ error: 'Unauthorized: Invalid ID token.' });
-        }
-      } else if (authHeader?.startsWith('Bearer mock-token-')) {
-        userId = authHeader.slice('Bearer mock-token-'.length).trim() || 'sandbox-user';
-      }
-
-      const apiKey = process.env.GEMINI_API_KEY?.trim();
-      if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-        return res.status(503).json({
-          error: 'Gemini Live is not configured on the server. Enable mock mode or set GEMINI_API_KEY.',
-          code: 'GEMINI_NOT_CONFIGURED',
-        });
-      }
-
-      // Check the quota only after authentication and configuration validation.
-      const limitCheck = await checkAndIncrementUserLimit(userId, 'token');
-      if (!limitCheck.allowed) {
-        return res.status(429).json({ error: limitCheck.message });
-      }
-
-      // Load the Gemini SDK only when a live token is actually requested. Keeping
-      // provider SDKs out of global server initialization prevents an unrelated
-      // provider/bundling failure from taking down /api/health or session creation.
-      const { GoogleGenAI, Modality } = await import('@google/genai');
-
-      // Never expose the long-lived API key. Provision a short-lived, single-use token instead.
-      // Ephemeral tokens and the constrained Live WebSocket must use the same API version.
-      // Google currently documents both token provisioning and client connection on v1beta.
-      const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1beta' } });
-      const expireTime = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-      const newSessionExpireTime = new Date(Date.now() + 60 * 1000).toISOString();
-      const liveModel = process.env.GEMINI_LIVE_MODEL || 'gemini-3.1-flash-live-preview';
-      const authToken = await ai.authTokens.create({
-        config: {
-          uses: 1,
-          expireTime,
-          newSessionExpireTime,
-          liveConnectConstraints: {
-            model: liveModel,
-            config: {
-              responseModalities: [Modality.AUDIO],
-              sessionResumption: {},
-            },
-          },
-          // IMPORTANT: when liveConnectConstraints is present and this option is
-          // omitted, the GenAI SDK treats the constrained setup as fully locked.
-          // That causes the browser's per-part systemInstruction (examinerPrompts)
-          // to be ignored by BidiGenerateContentConstrained. An empty mask locks
-          // only the fields explicitly constrained above, leaving systemInstruction,
-          // speechConfig, transcription, etc. configurable for each live part.
-          lockAdditionalFields: [],
-        },
-      });
-
-      if (!authToken.name) {
-        throw new Error('Gemini token provisioning returned an empty token.');
-      }
-
-      ServerLogger.info('Minted ephemeral Gemini session token', {
-        requestId: req.requestId,
-        userId,
-        provider: 'GeminiLive',
-        latencyMs: Date.now() - startTime,
-      });
-
-      return res.json({
-        token: authToken.name,
-        sandbox: false,
-        expiresAt: expireTime,
-        apiVersion: 'v1beta',
-        message: 'Successfully minted a short-lived Gemini Live token.',
-      });
-    } catch (err) {
-      next(err);
-    }
-  });
+  // API ROUTE 3: Paid-session-authorized Gemini Live token minting.
+  // Reuse the exact Vercel handler so local development cannot bypass the
+  // entitlement reservation by calling the mint endpoint directly.
+  app.post('/api/session/mint', (req: any, res: any) => sessionMintHandler(req, res));
 
   // API ROUTE 3.1: OpenAI Realtime Ephemeral Session Token Placeholder (Disabled)
   app.all(['/api/session/mint-openai', '/api/session/mint-openai/*'], async (req: any, res: any) => {

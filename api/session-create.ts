@@ -1,11 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { generateTestSnapshot } from '../src/services/questionBank';
 import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdmin';
+import { releaseReservation, reserveTestCredit } from './_billing';
 
-const API_REVISION = '1.1.9';
-const SESSION_LIMIT = 15;
-const DAY_MS = 24 * 60 * 60 * 1000;
-
+const API_REVISION = '1.2.0-paid-access';
 type PracticeMode = 'full' | 'part1' | 'part2' | 'part3';
 
 function setCommonHeaders(req: any, res: any) {
@@ -15,7 +13,6 @@ function setCommonHeaders(req: any, res: any) {
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
-
   if (origin && allowed.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
@@ -27,11 +24,7 @@ function setCommonHeaders(req: any, res: any) {
 function requestBody(req: any): any {
   if (!req.body) return {};
   if (typeof req.body === 'string') {
-    try {
-      return JSON.parse(req.body);
-    } catch {
-      return {};
-    }
+    try { return JSON.parse(req.body); } catch { return {}; }
   }
   return req.body;
 }
@@ -41,9 +34,7 @@ function cleanForFirestore<T>(value: T): T {
 }
 
 function publicError(error: any) {
-  const code = typeof error?.code === 'string' || typeof error?.code === 'number'
-    ? String(error.code)
-    : undefined;
+  const code = typeof error?.code === 'string' || typeof error?.code === 'number' ? String(error.code) : undefined;
   const message = typeof error?.message === 'string' ? error.message : 'Unknown server error';
   return { code, message: message.slice(0, 500) };
 }
@@ -56,7 +47,6 @@ async function verifyUser(req: any) {
     error.publicCode = 'AUTH_REQUIRED';
     throw error;
   }
-
   const token = authorization.slice('Bearer '.length).trim();
   if (!token) {
     const error: any = new Error('Authentication token is empty.');
@@ -64,7 +54,6 @@ async function verifyUser(req: any) {
     error.publicCode = 'AUTH_REQUIRED';
     throw error;
   }
-
   try {
     const { auth } = ensureSessionFirebaseAdmin();
     return await auth.verifyIdToken(token);
@@ -77,41 +66,6 @@ async function verifyUser(req: any) {
   }
 }
 
-async function checkSessionQuotaBestEffort(userId: string): Promise<{ allowed: boolean; message?: string }> {
-  try {
-    const { db } = ensureSessionFirebaseAdmin();
-    const ref = db.collection('userLimits').doc(userId);
-    const snap = await ref.get();
-    const now = Date.now();
-    const raw = snap.exists ? (snap.data() || {}) : {};
-    const lastReset = Number(raw.lastResetTimestamp) || now;
-    const resetRequired = now - lastReset > DAY_MS;
-    const sessionsToday = resetRequired ? 0 : (Number(raw.sessionsToday) || 0);
-
-    if (sessionsToday >= SESSION_LIMIT) {
-      return {
-        allowed: false,
-        message: `Daily practice session limit reached (${sessionsToday}/${SESSION_LIMIT}).`,
-      };
-    }
-
-    const next = {
-      userId,
-      sessionsToday: sessionsToday + 1,
-      tokensMintedToday: resetRequired ? 0 : (Number(raw.tokensMintedToday) || 0),
-      evaluationsToday: resetRequired ? 0 : (Number(raw.evaluationsToday) || 0),
-      lastResetTimestamp: resetRequired || !snap.exists ? now : lastReset,
-    };
-
-    await ref.set(next, { merge: true });
-    return { allowed: true };
-  } catch (error) {
-    // Quota persistence must never prevent an authenticated learner from launching a test.
-    console.warn('[HEXA session-create] quota check degraded; allowing session launch', publicError(error));
-    return { allowed: true };
-  }
-}
-
 export default async function handler(req: any, res: any) {
   setCommonHeaders(req, res);
   const requestId = String(req.headers?.['x-request-id'] || `req-${randomUUID()}`);
@@ -119,55 +73,34 @@ export default async function handler(req: any, res: any) {
   res.setHeader('X-HEXA-API-Revision', API_REVISION);
 
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') {
-    return res.status(405).json({
-      error: 'Method not allowed.',
-      code: 'METHOD_NOT_ALLOWED',
-      stage: 'request',
-      requestId,
-      apiRevision: API_REVISION,
-    });
-  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed.', code: 'METHOD_NOT_ALLOWED', requestId, apiRevision: API_REVISION });
 
   let stage = 'authentication';
+  let userId = '';
+  let sessionId = '';
+  let reservationCreated = false;
   try {
     const decoded = await verifyUser(req);
-    const userId = decoded.uid;
+    userId = decoded.uid;
 
     stage = 'request_validation';
     const body = requestBody(req);
     const mode: PracticeMode = body.mode ?? 'full';
     if (!['full', 'part1', 'part2', 'part3'].includes(mode)) {
-      return res.status(400).json({
-        error: 'Invalid mode. Expected full, part1, part2, or part3.',
-        code: 'INVALID_SESSION_MODE',
-        stage,
-        requestId,
-        apiRevision: API_REVISION,
-      });
+      return res.status(400).json({ error: 'Invalid mode. Expected full, part1, part2, or part3.', code: 'INVALID_SESSION_MODE', stage, requestId, apiRevision: API_REVISION });
     }
 
-    const seed = typeof body.seed === 'string' && body.seed.length <= 200
-      ? body.seed
-      : `seed-${randomUUID()}`;
+    const seed = typeof body.seed === 'string' && body.seed.length <= 200 ? body.seed : `seed-${randomUUID()}`;
     const cueCardId = typeof body.cueCardId === 'string' ? body.cueCardId : undefined;
-
-    stage = 'quota_check';
-    const quota = await checkSessionQuotaBestEffort(userId);
-    if (!quota.allowed) {
-      return res.status(429).json({
-        error: quota.message,
-        code: 'SESSION_DAILY_LIMIT',
-        stage,
-        requestId,
-        apiRevision: API_REVISION,
-      });
-    }
 
     stage = 'test_generation';
     const snapshot = generateTestSnapshot(seed, mode, cueCardId);
-    const sessionId = `session-${randomUUID()}`;
+    sessionId = `session-${randomUUID()}`;
     const now = Date.now();
+
+    stage = 'billing_reservation';
+    const billingReservation = await reserveTestCredit(userId, sessionId, mode);
+    reservationCreated = billingReservation?.status === 'reserved';
 
     const session = cleanForFirestore({
       id: sessionId,
@@ -188,61 +121,46 @@ export default async function handler(req: any, res: any) {
       } : {}),
       transcript: [],
       selectedTestSnapshot: snapshot,
+      billingReservationId: sessionId,
     });
 
     stage = 'firestore_persistence';
-    let serverPersistence: 'firestore' | 'recovery' = 'recovery';
     try {
       const { db } = ensureSessionFirebaseAdmin();
       const sessionRef = db.collection('speakingSessions').doc(sessionId);
       await sessionRef.set(session);
-
       const batch = db.batch();
       [1, 2, 3].forEach((partIndex) => {
         const partRef = sessionRef.collection('parts').doc(`part-${partIndex}`);
-        batch.set(partRef, {
-          id: `part-${partIndex}`,
-          sessionId,
-          partIndex,
-          status: 'idle',
-          startedAt: now,
-        });
+        batch.set(partRef, { id: `part-${partIndex}`, sessionId, partIndex, status: 'idle', startedAt: now });
       });
       await batch.commit();
-      serverPersistence = 'firestore';
-    } catch (error) {
-      // Session creation succeeds even if Firestore is temporarily unavailable.
-      console.warn('[HEXA session-create] Firestore persistence degraded; returning recoverable session', {
-        requestId,
-        ...publicError(error),
-      });
+    } catch (firestoreError: any) {
+      if (reservationCreated) {
+        await releaseReservation(userId, sessionId, 'Authoritative session persistence failed before test launch.').catch(() => undefined);
+        reservationCreated = false;
+      }
+      const error: any = new Error('The test could not be stored securely, so no credit was charged. Please retry.');
+      error.httpStatus = 503;
+      error.publicCode = 'SESSION_PERSISTENCE_FAILED';
+      error.cause = firestoreError;
+      throw error;
     }
 
-    return res.status(201).json({
-      ...session,
-      serverPersistence,
-      requestId,
-      apiRevision: API_REVISION,
-    });
+    return res.status(201).json({ ...session, serverPersistence: 'firestore', billingReservation, requestId, apiRevision: API_REVISION });
   } catch (error: any) {
+    if (reservationCreated && userId && sessionId) {
+      await releaseReservation(userId, sessionId, `Session creation failed during ${stage}.`).catch(() => undefined);
+    }
     const safe = publicError(error);
     const status = Number(error?.httpStatus) || 500;
-    console.error('[HEXA session-create] failed', {
-      requestId,
-      stage,
-      errorCode: safe.code,
-      publicCode: error?.publicCode,
-      causeCode: error?.causeCode,
-      message: safe.message,
-    });
-
+    console.error('[HEXA session-create] failed', { requestId, stage, publicCode: error?.publicCode, causeCode: error?.causeCode, message: safe.message });
     return res.status(status).json({
       error: status === 500 ? `Session creation failed during ${stage}.` : safe.message,
       code: error?.publicCode || 'SESSION_CREATE_FAILED',
       stage,
       requestId,
       apiRevision: API_REVISION,
-      ...(status === 500 ? { diagnostic: safe.message, runtimeErrorCode: safe.code } : {}),
       ...(error?.causeCode ? { runtimeErrorCode: String(error.causeCode) } : {}),
     });
   }

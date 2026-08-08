@@ -6,8 +6,9 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from '../services/routerContext';
 import { useAuth } from '../services/authContext';
+import { useBilling } from '../services/billingContext';
 import { Route, RoutePath, UserProfile } from '../types';
-import { Sparkles, LayoutDashboard, History, Settings, LogIn, LogOut, Compass, GraduationCap, Menu, X, ShieldCheck, Activity, AlertTriangle } from 'lucide-react';
+import { Sparkles, LayoutDashboard, History, Settings, LogIn, LogOut, Compass, GraduationCap, Menu, X, ShieldCheck, Activity, AlertTriangle, CreditCard, BadgeDollarSign } from 'lucide-react';
 import { LandingView } from './LandingView';
 import { LoginView } from './LoginView';
 import { OnboardingView } from './OnboardingView';
@@ -19,11 +20,14 @@ import { HistoryView } from './HistoryView';
 import { SettingsView } from './SettingsView';
 import { PrivacySettingsView } from './PrivacySettingsView';
 import { AdminDiagnosticsView } from './AdminDiagnosticsView';
+import { BillingView } from './BillingView';
+import { AdminBillingView } from './AdminBillingView';
 import { HexasBrand } from './HexasBrand';
 
 export const NavigationShell: React.FC = () => {
   const { currentRoute, navigate } = useRouter();
   const { user, loading, signOut } = useAuth();
+  const { isAdmin } = useBilling();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [redirectRoute, setRedirectRoute] = useState<Route | null>(null);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
@@ -147,6 +151,8 @@ export const NavigationShell: React.FC = () => {
         return <ResultsView sessionId={currentRoute.params?.sessionId} />;
       case '/history':
         return <HistoryView />;
+      case '/billing':
+        return <BillingView />;
       case '/settings':
         return <SettingsView />;
       case '/privacy':
@@ -158,6 +164,8 @@ export const NavigationShell: React.FC = () => {
             onNavigateHome={() => navigate('/dashboard')}
           />
         );
+      case '/admin/billing':
+        return <AdminBillingView />;
       case '/admin':
         return (
           <AdminDiagnosticsView
@@ -228,6 +236,17 @@ export const NavigationShell: React.FC = () => {
               </button>
 
               <button
+                id="nav-link-billing"
+                onClick={() => handleNav('/billing')}
+                className={`flex items-center gap-1.5 text-xs font-semibold py-2 px-3.5 rounded-lg transition duration-150 cursor-pointer ${
+                  currentRoute.path === '/billing' ? 'bg-[var(--hexa-navy)] text-white shadow-sm' : 'text-gray-600 hover:text-gray-950 hover:bg-gray-50'
+                }`}
+              >
+                <CreditCard size={14} />
+                <span>Buy Tests</span>
+              </button>
+
+              <button
                 id="nav-link-settings"
                 onClick={() => handleNav('/settings')}
                 className={`flex items-center gap-1.5 text-xs font-semibold py-2 px-3.5 rounded-lg transition duration-150 cursor-pointer ${
@@ -249,16 +268,30 @@ export const NavigationShell: React.FC = () => {
                 <span>Privacy</span>
               </button>
 
-              <button
-                id="nav-link-admin"
-                onClick={() => handleNav('/admin')}
-                className={`flex items-center gap-1.5 text-xs font-semibold py-2 px-3.5 rounded-lg transition duration-150 cursor-pointer ${
-                  currentRoute.path === '/admin' ? 'bg-[var(--hexa-navy)] text-white shadow-sm' : 'text-gray-600 hover:text-gray-950 hover:bg-gray-50'
-                }`}
-              >
-                <Activity size={14} />
-                <span>Diagnostics</span>
-              </button>
+              {isAdmin && (
+                <>
+                  <button
+                    id="nav-link-admin-billing"
+                    onClick={() => handleNav('/admin/billing')}
+                    className={`flex items-center gap-1.5 text-xs font-semibold py-2 px-3.5 rounded-lg transition duration-150 cursor-pointer ${
+                      currentRoute.path === '/admin/billing' ? 'bg-[var(--hexa-navy)] text-white shadow-sm' : 'text-gray-600 hover:text-gray-950 hover:bg-gray-50'
+                    }`}
+                  >
+                    <BadgeDollarSign size={14} />
+                    <span>Billing Admin</span>
+                  </button>
+                  <button
+                    id="nav-link-admin"
+                    onClick={() => handleNav('/admin')}
+                    className={`flex items-center gap-1.5 text-xs font-semibold py-2 px-3.5 rounded-lg transition duration-150 cursor-pointer ${
+                      currentRoute.path === '/admin' ? 'bg-[var(--hexa-navy)] text-white shadow-sm' : 'text-gray-600 hover:text-gray-950 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Activity size={14} />
+                    <span>Diagnostics</span>
+                  </button>
+                </>
+              )}
 
               <div className="h-6 w-px bg-gray-200 mx-1" aria-hidden="true" />
 
@@ -329,6 +362,16 @@ export const NavigationShell: React.FC = () => {
             <span>Practice History</span>
           </button>
           <button
+            id="mobile-nav-billing"
+            onClick={() => handleNav('/billing')}
+            className={`flex items-center gap-2.5 text-xs font-bold py-3 px-4 rounded-xl text-left ${
+              currentRoute.path === '/billing' ? 'bg-[var(--hexa-navy)] text-white' : 'text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            <CreditCard size={16} />
+            <span>Buy Tests</span>
+          </button>
+          <button
             id="mobile-nav-settings"
             onClick={() => handleNav('/settings')}
             className={`flex items-center gap-2.5 text-xs font-bold py-3 px-4 rounded-xl text-left ${
@@ -348,16 +391,30 @@ export const NavigationShell: React.FC = () => {
             <ShieldCheck size={16} />
             <span>Privacy</span>
           </button>
-          <button
-            id="mobile-nav-admin"
-            onClick={() => handleNav('/admin')}
-            className={`flex items-center gap-2.5 text-xs font-bold py-3 px-4 rounded-xl text-left ${
-              currentRoute.path === '/admin' ? 'bg-[var(--hexa-navy)] text-white' : 'text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            <Activity size={16} />
-            <span>Diagnostics</span>
-          </button>
+          {isAdmin && (
+            <>
+              <button
+                id="mobile-nav-admin-billing"
+                onClick={() => handleNav('/admin/billing')}
+                className={`flex items-center gap-2.5 text-xs font-bold py-3 px-4 rounded-xl text-left ${
+                  currentRoute.path === '/admin/billing' ? 'bg-[var(--hexa-navy)] text-white' : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <BadgeDollarSign size={16} />
+                <span>Billing Admin</span>
+              </button>
+              <button
+                id="mobile-nav-admin"
+                onClick={() => handleNav('/admin')}
+                className={`flex items-center gap-2.5 text-xs font-bold py-3 px-4 rounded-xl text-left ${
+                  currentRoute.path === '/admin' ? 'bg-[var(--hexa-navy)] text-white' : 'text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <Activity size={16} />
+                <span>Diagnostics</span>
+              </button>
+            </>
+          )}
 
           <div className="border-t border-gray-100 pt-3 mt-1">
             <div className="px-4 pb-2">

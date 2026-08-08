@@ -101,6 +101,7 @@ describe('GeminiLiveAdapter', () => {
 
     const config: RealtimeVoiceConfig = {
       sampleRate: 16000,
+      sessionId: 'session-test-paid-access',
       systemInstruction: 'You are an official IELTS examiner.',
       onTranscript: () => {},
       onError: (error) => { receivedError = error; },
@@ -111,7 +112,10 @@ describe('GeminiLiveAdapter', () => {
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       '/api/session/mint',
-      expect.objectContaining({ method: 'POST' })
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ sessionId: 'session-test-paid-access' }),
+      })
     );
     expect(statusChanges).toContain('connecting');
     expect(statusChanges).toContain('connected');

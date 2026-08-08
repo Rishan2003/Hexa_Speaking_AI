@@ -6,6 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from '../services/routerContext';
 import { useAuth } from '../services/authContext';
+import { useBilling } from '../services/billingContext';
 import { FirebaseRepository } from '../services/firebaseRepository';
 import { IELTSPracticeSession, IELTSEvaluation } from '../types';
 import {
@@ -21,6 +22,8 @@ import {
   Play,
   Sparkles,
   Target,
+  CreditCard,
+  Infinity,
 } from 'lucide-react';
 
 const modeCards = [
@@ -62,9 +65,14 @@ const modeCards = [
 export const DashboardView: React.FC = () => {
   const { navigate } = useRouter();
   const { user } = useAuth();
+  const { entitlement, loading: billingLoading, refresh: refreshBilling } = useBilling();
   const [sessions, setSessions] = useState<IELTSPracticeSession[]>([]);
   const [evaluations, setEvaluations] = useState<Record<string, IELTSEvaluation>>({});
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    void refreshBilling();
+  }, [user?.uid]);
 
   useEffect(() => {
     let active = true;
@@ -181,6 +189,30 @@ export const DashboardView: React.FC = () => {
             </span>
           </button>
         </div>
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className="rounded-2xl bg-[var(--hexa-soft-blue)] p-3 text-[var(--hexa-navy)]">
+            {entitlement?.unlimited ? <Infinity size={21} /> : <CreditCard size={21} />}
+          </span>
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Test access</p>
+            <h2 className="mt-1 text-base font-black text-slate-950">
+              {billingLoading || !entitlement
+                ? 'Checking your access…'
+                : entitlement.unlimited && (!entitlement.unlimitedUntil || entitlement.unlimitedUntil > Date.now())
+                  ? entitlement.unlimitedUntil
+                    ? `Unlimited until ${new Date(entitlement.unlimitedUntil).toLocaleDateString()}`
+                    : 'Unlimited speaking tests'
+                  : `${entitlement.creditBalance} test${entitlement.creditBalance === 1 ? '' : 's'} remaining`}
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">Credits are verified securely whenever a new speaking test is created.</p>
+          </div>
+        </div>
+        <button onClick={() => navigate('/billing')} className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-black text-white hover:bg-slate-800">
+          {entitlement && !entitlement.unlimited && entitlement.creditBalance === 0 ? 'Buy a test' : 'Manage test access'}
+        </button>
       </section>
 
       {loading ? (

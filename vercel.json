@@ -4,6 +4,10 @@
   "outputDirectory": "public",
   "rewrites": [
     {
+      "source": "/api/billing/:path*",
+      "destination": "/api/billing?path=:path*"
+    },
+    {
       "source": "/api/session/create",
       "destination": "/api/session-create"
     },
@@ -66,6 +70,22 @@
     {
       "source": "/settings",
       "destination": "/index.html"
+    },
+    {
+      "source": "/billing",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin/billing",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/index.html"
     }
   ],
   "headers": [
@@ -109,6 +129,9 @@
     },
     "api/feedback-voice.ts": {
       "maxDuration": 60
+    },
+    "api/billing.ts": {
+      "maxDuration": 30
     }
   }
 }

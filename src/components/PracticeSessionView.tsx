@@ -18,6 +18,8 @@ import { buildPart1SystemInstruction, buildPart2SystemInstruction, buildPart3Sys
 import { SessionLeaseManager } from '../services/sessionLease';
 import { RecordingUploadService } from '../services/recordingUploadService';
 import { FirebaseRepository } from '../services/firebaseRepository';
+import { BillingService } from '../services/billingService';
+import { useBilling } from '../services/billingContext';
 import { sanitizeText } from '../utils/sanitize';
 import { appendExaminerControlText, detectExaminerBoundary, normalizeExaminerControlText } from '../services/examCompletion';
 import {
@@ -46,6 +48,7 @@ interface PracticeSessionViewProps {
 
 export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessionId }) => {
   const { navigate } = useRouter();
+  const { refresh: refreshBilling } = useBilling();
   
   // App states
   const [session, setSession] = useState<IELTSPracticeSession | null>(null);
@@ -550,6 +553,7 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
     setConnectionStatus('connecting');
     await provider.initialize({
       sampleRate: 16000,
+      sessionId: session.id,
       systemInstruction,
       // Part 2's long turn must survive natural pauses. Gemini server-side VAD
       // would otherwise commit the candidate turn on silence and make the
@@ -604,6 +608,11 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
         setConnectionStatus(status);
       }
     });
+
+    // The credit is only consumed once the live provider has connected and
+    // completed its setup. This call is idempotent across reconnects/part rotations.
+    await BillingService.consumeReservation(session.id);
+    void refreshBilling();
     setConnectionStatus('connected');
 
     const openingInstruction = part === IELTSExamPart.PART_3
@@ -672,6 +681,19 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
       }
     } catch (err: any) {
       console.error('Failed to connect voice provider:', err);
+      const failedProvider = voiceProviderRef.current;
+      voiceProviderRef.current = null;
+      if (failedProvider) {
+        void failedProvider.disconnect().catch(() => undefined);
+      }
+      if (session?.id && !APP_CONFIG.useMocks) {
+        void BillingService.releaseReservation(
+          session.id,
+          err?.message || 'Live examiner failed to connect before the test began.'
+        ).then(() => refreshBilling()).catch((releaseError) => {
+          console.warn('[PracticeSessionView] Could not release billing reservation immediately:', releaseError);
+        });
+      }
       setCurrentState(ExamState.FAILED);
       setErrorMessage(err.message || 'Fatal Connection Error');
       setConnectionStatus('disconnected');
