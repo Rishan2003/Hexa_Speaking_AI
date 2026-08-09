@@ -336,8 +336,20 @@ export const PracticeSetupView: React.FC = () => {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const launchError: any = new Error(payload?.error || `Could not create test (${response.status}).`);
+        const requestId = payload?.requestId || response.headers.get('x-request-id') || undefined;
+        const details = [
+          payload?.code ? `code: ${payload.code}` : '',
+          payload?.stage ? `stage: ${payload.stage}` : '',
+          requestId ? `request ID: ${requestId}` : '',
+          payload?.apiRevision ? `revision: ${payload.apiRevision}` : '',
+          payload?.runtimeErrorCode ? `runtime: ${payload.runtimeErrorCode}` : '',
+          payload?.detail?.message ? `detail: ${payload.detail.message}` : '',
+        ].filter(Boolean).join(' · ');
+        const baseMessage = payload?.error || `Could not create test (${response.status}).`;
+        const launchError: any = new Error(details ? `${baseMessage} (${details})` : baseMessage);
         launchError.code = payload?.code;
+        launchError.stage = payload?.stage;
+        launchError.requestId = requestId;
         launchError.status = response.status;
         throw launchError;
       }

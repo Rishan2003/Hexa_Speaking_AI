@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
+import type {
   SelectedTestSnapshot,
   SelectedTestPart1Group,
   SelectedTestPart2Card,
   SelectedTestPart3Question
-} from '../types';
+} from '../types.js';
 
 // Deterministic pseudo-random number generator using Mulberry32
 export function getSeededRandom(seed: string): () => number {
