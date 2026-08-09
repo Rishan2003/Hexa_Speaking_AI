@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdminLazy';
+import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdminLazy.js';
 
 export type AccessType = 'credits' | 'unlimited';
 export type PaymentProvider = 'development' | 'sslcommerz';

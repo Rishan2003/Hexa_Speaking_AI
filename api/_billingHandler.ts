@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdminLazy';
+import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdminLazy.js';
 import {
   adminGrantCredits,
   adminSetBalance,
@@ -17,9 +17,9 @@ import {
   consumeReservation,
   type PaymentProvider,
   type TestPackageRecord,
-} from './_billing';
+} from './_billing.js';
 
-const API_REVISION = '1.2.2-paid-access-bootstrap-probe';
+const API_REVISION = '1.2.3-paid-access-esm-import-fix';
 
 function setCommonHeaders(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');

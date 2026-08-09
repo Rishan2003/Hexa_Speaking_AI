@@ -6,7 +6,7 @@
  * returns diagnostic JSON instead of FUNCTION_INVOCATION_FAILED.
  */
 
-const API_REVISION = '1.2.2-billing-zero-import-bootstrap';
+const API_REVISION = '1.2.3-billing-esm-import-fix';
 
 function setHeaders(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
@@ -60,7 +60,7 @@ export default async function billingBootstrap(req: any, res: any) {
 
     let module: any;
     try {
-      module = await import('./_billingHandler');
+      module = await import('./_billingHandler.js');
     } catch (error: any) {
       console.error('[HEXA billing bootstrap] implementation import failed', error);
       return res.status(500).json({
