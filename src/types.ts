@@ -55,8 +55,17 @@ export interface TestPackage {
   updatedAt: number;
 }
 
+export interface TestCreditCosts {
+  part1: number;
+  part2: number;
+  part3: number;
+  full: number;
+}
+
 export interface BillingSettings {
+  /** Legacy field name retained for Firestore compatibility; value is a credit allowance. */
   signupFreeTests: number;
+  creditCosts: TestCreditCosts;
   currency: 'BDT';
   developmentPaymentsEnabled: boolean;
   activeProvider: PaymentProvider;
