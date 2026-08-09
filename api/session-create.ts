@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { generateTestSnapshot } from '../src/services/questionBank';
-import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdmin';
-import { releaseReservation, reserveTestCredit } from './_billing';
+import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdmin.js';
+import { verifyFirebaseIdTokenViaLookup } from './_firebaseIdTokenLookup.js';
+import { releaseReservation, reserveTestCredit } from './_billing.js';
 
-const API_REVISION = '1.2.0-paid-access';
+const API_REVISION = '1.2.4-paid-access-auth-interop-fix';
 type PracticeMode = 'full' | 'part1' | 'part2' | 'part3';
 
 function setCommonHeaders(req: any, res: any) {
@@ -48,20 +49,13 @@ async function verifyUser(req: any) {
     throw error;
   }
   const token = authorization.slice('Bearer '.length).trim();
-  if (!token) {
-    const error: any = new Error('Authentication token is empty.');
-    error.httpStatus = 401;
-    error.publicCode = 'AUTH_REQUIRED';
-    throw error;
-  }
   try {
-    const { auth } = ensureSessionFirebaseAdmin();
-    return await auth.verifyIdToken(token);
+    return await verifyFirebaseIdTokenViaLookup(token);
   } catch (cause: any) {
-    const error: any = new Error(cause?.message || 'Firebase ID token verification failed.');
-    error.httpStatus = 401;
-    error.publicCode = 'FIREBASE_TOKEN_VERIFY_FAILED';
-    error.causeCode = cause?.code;
+    const error: any = new Error(String(cause?.message || 'Firebase ID token verification failed.'));
+    error.httpStatus = Number(cause?.httpStatus) || 401;
+    error.publicCode = String(cause?.code || 'FIREBASE_TOKEN_VERIFY_FAILED');
+    error.causeCode = cause?.upstreamCode || cause?.code;
     throw error;
   }
 }

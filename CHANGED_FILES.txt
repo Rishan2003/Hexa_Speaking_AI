@@ -1,10 +1,17 @@
-Changed files from v1.2.0 -> v1.2.1
+HEXA Speaking AI v1.2.4 changed files
 
-Modified:
-- api/_billing.ts
+Replace:
 - api/billing.ts
-- package.json
-
-Added:
-- BILLING_BOOTSTRAP_FIX_v1.2.1.md
+- api/_billingHandler.ts
+- api/_billing.ts
 - api/_firebaseSessionAdminLazy.ts
+- api/_firebaseSessionAdmin.ts
+- api/session-create.ts
+
+Add:
+- api/_firebaseIdTokenLookup.ts
+
+Documentation:
+- FIREBASE_ADMIN_AUTH_INTEROP_FIX_v1.2.4.md
+
+No package.json or package-lock.json change is required for this fix.

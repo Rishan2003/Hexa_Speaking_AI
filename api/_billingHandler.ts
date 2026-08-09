@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdminLazy.js';
+import { verifyFirebaseIdTokenViaLookup } from './_firebaseIdTokenLookup.js';
 import {
   adminGrantCredits,
   adminSetBalance,
@@ -19,7 +20,7 @@ import {
   type TestPackageRecord,
 } from './_billing.js';
 
-const API_REVISION = '1.2.3-paid-access-esm-import-fix';
+const API_REVISION = '1.2.4-paid-access-auth-interop-fix';
 
 function setCommonHeaders(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
@@ -66,23 +67,14 @@ async function verifyUser(req: any) {
     error.publicCode = 'AUTH_REQUIRED';
     throw error;
   }
+
   const token = authorization.slice('Bearer '.length).trim();
-  let auth: any;
   try {
-    ({ auth } = await ensureSessionFirebaseAdmin());
+    return await verifyFirebaseIdTokenViaLookup(token);
   } catch (cause: any) {
-    const error: any = new Error(`Firebase Admin could not initialize: ${String(cause?.message || cause)}`);
-    error.httpStatus = 500;
-    error.publicCode = 'FIREBASE_ADMIN_INIT_FAILED';
-    error.cause = cause;
-    throw error;
-  }
-  try {
-    return await auth.verifyIdToken(token);
-  } catch (cause: any) {
-    const error: any = new Error('Your sign-in session could not be verified.');
-    error.httpStatus = 401;
-    error.publicCode = 'AUTH_INVALID';
+    const error: any = new Error(String(cause?.message || 'Your sign-in session could not be verified.'));
+    error.httpStatus = Number(cause?.httpStatus) || 401;
+    error.publicCode = String(cause?.code || 'AUTH_INVALID');
     error.cause = cause;
     throw error;
   }

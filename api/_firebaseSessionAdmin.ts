@@ -1,5 +1,4 @@
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 
 interface ServiceAccountShape {
@@ -60,6 +59,10 @@ function configuredServiceAccount(): Required<Pick<ServiceAccountShape, 'project
 
 let initialized = false;
 
+/**
+ * Firestore-only Admin bootstrap. Do not import firebase-admin/auth here;
+ * Firebase ID tokens are verified through _firebaseIdTokenLookup instead.
+ */
 export function ensureSessionFirebaseAdmin() {
   if (!initialized) {
     if (getApps().length === 0) {
@@ -78,10 +81,7 @@ export function ensureSessionFirebaseAdmin() {
     initialized = true;
   }
 
-  return {
-    auth: getAuth(),
-    db: getFirestore(),
-  };
+  return { db: getFirestore() };
 }
 
 export function firebaseCredentialPresence() {

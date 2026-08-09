@@ -53,23 +53,21 @@ function configuredServiceAccount(): Required<Pick<ServiceAccountShape, 'project
   return { projectId, clientEmail, privateKey };
 }
 
-type AdminHandles = { auth: any; db: any };
+type AdminHandles = { db: any };
 let adminHandlesPromise: Promise<AdminHandles> | null = null;
 
 /**
- * Lazy Firebase Admin bootstrap for Vercel billing functions.
+ * Lazy Firestore-only Firebase Admin bootstrap for Vercel paid-access functions.
  *
- * IMPORTANT: firebase-admin is intentionally dynamically imported only after
- * the request handler has started. This prevents an SDK/module-load problem
- * from crashing the Vercel Function before our handler can return diagnostic
- * JSON (FUNCTION_INVOCATION_FAILED).
+ * firebase-admin/auth is deliberately NOT imported. Authentication is handled
+ * by api/_firebaseIdTokenLookup.ts so the Vercel runtime never loads the
+ * jwks-rsa -> jose dependency path that was failing under Node 22.
  */
 export async function ensureSessionFirebaseAdmin(): Promise<AdminHandles> {
   if (!adminHandlesPromise) {
     adminHandlesPromise = (async () => {
-      const [appModule, authModule, firestoreModule] = await Promise.all([
+      const [appModule, firestoreModule] = await Promise.all([
         import('firebase-admin/app'),
-        import('firebase-admin/auth'),
         import('firebase-admin/firestore'),
       ]);
 
@@ -87,12 +85,8 @@ export async function ensureSessionFirebaseAdmin(): Promise<AdminHandles> {
         });
       }
 
-      return {
-        auth: authModule.getAuth(),
-        db: firestoreModule.getFirestore(),
-      };
+      return { db: firestoreModule.getFirestore() };
     })().catch((error) => {
-      // Allow a later request to retry after an environment/deployment fix.
       adminHandlesPromise = null;
       throw error;
     });
