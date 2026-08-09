@@ -1,5 +1,4 @@
 api/session-create.ts
 api/_sessionCreateHandler.ts
-src/services/questionBank.ts
 src/components/PracticeSetupView.tsx
-SESSION_CREATE_BOOTSTRAP_FIX_v1.2.5.md
+SESSION_RUNTIME_ISOLATION_FIX_v1.2.6.md

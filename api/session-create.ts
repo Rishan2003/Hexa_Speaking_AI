@@ -1,4 +1,4 @@
-const API_REVISION = '1.2.5-session-zero-import-bootstrap';
+const API_REVISION = '1.2.6-session-runtime-isolation';
 
 function setHeaders(res: any) {
   res.setHeader('Cache-Control', 'no-store');

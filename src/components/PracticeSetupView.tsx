@@ -321,6 +321,11 @@ export const PracticeSetupView: React.FC = () => {
 
       const card = CUE_CARDS_BANK.find(c => c.id === selectedCueCardId) || CUE_CARDS_BANK[0];
       const seed = `seed-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      const snapshot = generateTestSnapshot(
+        seed,
+        selectedMode,
+        selectedMode === 'part1' ? undefined : card.id
+      );
       const idToken = await getFirebaseIdToken();
       const response = await fetch('/api/session/create', {
         method: 'POST',
@@ -330,8 +335,7 @@ export const PracticeSetupView: React.FC = () => {
         },
         body: JSON.stringify({
           mode: selectedMode,
-          seed,
-          cueCardId: selectedMode === 'part1' ? undefined : card.id,
+          selectedTestSnapshot: snapshot,
         }),
       });
       const payload = await response.json().catch(() => ({}));
