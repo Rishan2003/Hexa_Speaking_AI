@@ -1,4 +1,4 @@
-const API_REVISION = '1.2.2-paid-mint-auth-zero-imports';
+const API_REVISION = '1.2.9-paid-mint-direct-firestore-auth';
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
 function makeRequestId() {
@@ -32,18 +32,149 @@ function requestBody(req: any): any {
   try { return JSON.parse(String(req.body)); } catch { return {}; }
 }
 
-function internalAppBaseUrl(req: any): string {
-  // VERCEL_URL points at the current deployment, which is safer for preview
-  // deployments than accidentally calling the production domain.
-  const vercelUrl = String(runtimeEnv.VERCEL_URL || '').trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
-  if (vercelUrl) return `https://${vercelUrl}`;
 
-  const configured = String(runtimeEnv.APP_URL || runtimeEnv.VITE_APP_URL || '').trim().replace(/\/$/, '');
-  if (configured) return configured;
+interface ServiceAccountShape {
+  projectId?: string;
+  project_id?: string;
+  clientEmail?: string;
+  client_email?: string;
+  privateKey?: string;
+  private_key?: string;
+}
 
-  const proto = String(req.headers?.['x-forwarded-proto'] || 'http').split(',')[0].trim();
-  const host = String(req.headers?.['x-forwarded-host'] || req.headers?.host || '').split(',')[0].trim();
-  return host ? `${proto}://${host}` : '';
+type AdminHandles = { db: any };
+let adminHandlesPromise: Promise<AdminHandles> | null = null;
+
+function parseServiceAccount(raw: string): ServiceAccountShape | null {
+  const candidates = [raw.trim()];
+  try { candidates.push(Buffer.from(raw.trim(), 'base64').toString('utf8')); } catch { /* ignore */ }
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object') return parsed as ServiceAccountShape;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+function configuredServiceAccount() {
+  let account: ServiceAccountShape | null = null;
+  if (runtimeEnv.FIREBASE_SERVICE_ACCOUNT?.trim()) {
+    account = parseServiceAccount(runtimeEnv.FIREBASE_SERVICE_ACCOUNT);
+    if (!account) throw Object.assign(new Error('FIREBASE_SERVICE_ACCOUNT is not valid JSON or base64-encoded JSON.'), { publicCode: 'FIREBASE_SERVICE_ACCOUNT_INVALID' });
+  } else {
+    account = {
+      projectId: runtimeEnv.FIREBASE_PROJECT_ID,
+      clientEmail: runtimeEnv.FIREBASE_CLIENT_EMAIL,
+      privateKey: runtimeEnv.FIREBASE_PRIVATE_KEY,
+    };
+  }
+
+  const projectId = account.projectId || account.project_id;
+  const clientEmail = account.clientEmail || account.client_email;
+  const privateKey = (account.privateKey || account.private_key)?.replace(/\\n/g, '\n');
+  if (!projectId || !clientEmail || !privateKey) {
+    throw Object.assign(new Error('Firebase Admin credentials are incomplete.'), { publicCode: 'FIREBASE_ADMIN_CREDENTIALS_INCOMPLETE' });
+  }
+  return { projectId, clientEmail, privateKey };
+}
+
+async function ensureFirestoreAdmin(): Promise<AdminHandles> {
+  if (!adminHandlesPromise) {
+    adminHandlesPromise = (async () => {
+      const [appModule, firestoreModule] = await Promise.all([
+        import('firebase-admin/app'),
+        import('firebase-admin/firestore'),
+      ]);
+
+      if (appModule.getApps().length === 0) {
+        const account = configuredServiceAccount();
+        appModule.initializeApp({
+          credential: appModule.cert({
+            projectId: account.projectId,
+            clientEmail: account.clientEmail,
+            privateKey: account.privateKey,
+          }),
+          ...(runtimeEnv.FIREBASE_STORAGE_BUCKET ? { storageBucket: runtimeEnv.FIREBASE_STORAGE_BUCKET } : {}),
+        });
+      }
+      return { db: firestoreModule.getFirestore() };
+    })().catch((error) => {
+      adminHandlesPromise = null;
+      throw error;
+    });
+  }
+  return adminHandlesPromise;
+}
+
+async function releaseExpiredReservation(db: any, userId: string, sessionId: string) {
+  const reservationRef = db.collection('testReservations').doc(sessionId);
+  const entitlementRef = db.collection('testEntitlements').doc(userId);
+  const ledgerRef = db.collection('entitlementLedger').doc(`release-${sessionId}`);
+  const now = Date.now();
+
+  return db.runTransaction(async (tx: any) => {
+    const [reservationSnap, entitlementSnap] = await Promise.all([
+      tx.get(reservationRef),
+      tx.get(entitlementRef),
+    ]);
+    if (!reservationSnap.exists) return;
+    const reservation = reservationSnap.data() || {};
+    if (reservation.userId !== userId || reservation.status !== 'reserved') return;
+    if (Number(reservation.expiresAt || 0) > now) return;
+
+    let balanceAfter = Number(entitlementSnap.data()?.creditBalance) || 0;
+    if (reservation.chargeType === 'credit' && entitlementSnap.exists) {
+      balanceAfter += 1;
+      tx.update(entitlementRef, { creditBalance: balanceAfter, updatedAt: now });
+      tx.set(ledgerRef, {
+        id: `release-${sessionId}`,
+        userId,
+        sessionId,
+        type: 'TEST_RESERVATION_RELEASED',
+        delta: 1,
+        balanceAfter,
+        note: 'Reservation expired before Gemini token authorization.',
+        createdAt: now,
+      }, { merge: true });
+    }
+    tx.update(reservationRef, {
+      status: 'released',
+      releasedAt: now,
+      releaseReason: 'Reservation expired before Gemini token authorization.',
+    });
+  });
+}
+
+async function authorizePaidSession(userId: string, sessionId: string) {
+  const { db } = await ensureFirestoreAdmin();
+  const [reservationSnap, sessionSnap] = await Promise.all([
+    db.collection('testReservations').doc(sessionId).get(),
+    db.collection('speakingSessions').doc(sessionId).get(),
+  ]);
+
+  if (!reservationSnap.exists || !sessionSnap.exists) {
+    return { ok: false, status: 403, code: 'PAID_SESSION_NOT_AUTHORIZED', error: 'This live session is not authorized for paid access.' };
+  }
+
+  const reservation = reservationSnap.data() || {};
+  const session = sessionSnap.data() || {};
+  const owned = reservation.userId === userId && session.userId === userId;
+  const linked = session.billingReservationId === sessionId && reservation.sessionId === sessionId;
+  const activeReservation = reservation.status === 'reserved' || reservation.status === 'consumed';
+  const activeSession = session.status === 'active';
+
+  if (!owned || !linked || !activeReservation || !activeSession) {
+    return { ok: false, status: 403, code: 'PAID_SESSION_NOT_AUTHORIZED', error: 'This live session is not authorized for paid access.' };
+  }
+
+  if (reservation.status === 'reserved' && Number(reservation.expiresAt || 0) <= Date.now()) {
+    await releaseExpiredReservation(db, userId, sessionId).catch(() => undefined);
+    return { ok: false, status: 409, code: 'RESERVATION_EXPIRED', error: 'This test reservation expired. Start a new test; the reserved credit has been returned.' };
+  }
+
+  return { ok: true, reservationStatus: String(reservation.status || '') };
 }
 
 export default async function handler(req: any, res: any) {
@@ -158,57 +289,27 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // Keep this function free of firebase-admin while still enforcing the paid
-    // entitlement. The billing function owns the Admin SDK and verifies that
-    // this exact user owns a server-created active session with a live billing
-    // reservation. A direct call to /api/session/mint therefore cannot bypass
-    // the test-credit system.
-    const internalBaseUrl = internalAppBaseUrl(req);
-    if (!internalBaseUrl) {
-      return send(res, 503, {
-        error: 'Could not determine the application URL needed to authorize the paid live session.',
-        code: 'APP_URL_MISSING',
-        stage: 'paid_session_authorization',
-        requestId,
-        apiRevision: API_REVISION,
-      });
-    }
-
-    const billingController = new AbortController();
-    const billingTimeout = setTimeout(() => billingController.abort(), 10_000);
-    let billingResponse: Response;
+    // Authorize the exact server-created paid session directly in Firestore.
+    // Do not call this deployment over HTTP: Vercel Preview Protection can
+    // intercept server-to-server requests and return "Protected deployment"
+    // before /api/billing is reached.
+    let paidAuthorization: any;
     try {
-      billingResponse = await fetch(`${internalBaseUrl}/api/billing/reservation/authorize-mint`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`,
-          'X-Request-ID': requestId,
-        },
-        body: JSON.stringify({ sessionId }),
-        signal: billingController.signal,
-      });
+      paidAuthorization = await authorizePaidSession(String(authResult.payload.users[0].localId), sessionId);
     } catch (error: any) {
-      const timedOut = error?.name === 'AbortError';
-      return send(res, 502, {
-        error: timedOut
-          ? 'Paid-session authorization timed out.'
-          : 'Could not reach the billing authorization endpoint.',
-        code: timedOut ? 'PAID_AUTH_TIMEOUT' : 'PAID_AUTH_NETWORK_ERROR',
+      return send(res, 503, {
+        error: `Paid-session authorization storage could not initialize: ${String(error?.message || error)}`,
+        code: error?.publicCode || 'PAID_AUTH_STORAGE_FAILED',
         stage: 'paid_session_authorization',
         requestId,
         apiRevision: API_REVISION,
       });
-    } finally {
-      clearTimeout(billingTimeout);
     }
 
-    const billingResult = await readJsonSafe(billingResponse);
-    if (!billingResponse.ok || billingResult.payload?.ok !== true) {
-      const status = billingResponse.status === 409 ? 409 : billingResponse.status >= 400 && billingResponse.status < 500 ? 403 : 502;
-      return send(res, status, {
-        error: upstreamMessage(billingResult.payload, 'This speaking session is not authorized to use Gemini Live.'),
-        code: billingResult.payload?.code || 'PAID_SESSION_NOT_AUTHORIZED',
+    if (!paidAuthorization?.ok) {
+      return send(res, Number(paidAuthorization?.status) || 403, {
+        error: paidAuthorization?.error || 'This speaking session is not authorized to use Gemini Live.',
+        code: paidAuthorization?.code || 'PAID_SESSION_NOT_AUTHORIZED',
         stage: 'paid_session_authorization',
         requestId,
         apiRevision: API_REVISION,
