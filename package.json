@@ -1,7 +1,7 @@
 {
   "name": "speakready-ielts",
   "private": true,
-  "version": "1.2.1-paid-tests-bootstrap-fix",
+  "version": "1.2.2-paid-tests-bootstrap-probe",
   "type": "module",
   "scripts": {
     "dev": "tsx watch server.ts",
