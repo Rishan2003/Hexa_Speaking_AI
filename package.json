@@ -1,7 +1,7 @@
 {
   "name": "speakready-ielts",
   "private": true,
-  "version": "1.2.2-paid-tests-bootstrap-probe",
+  "version": "1.2.8-firebase-admin-13-compat",
   "type": "module",
   "scripts": {
     "dev": "tsx watch server.ts",
@@ -23,7 +23,7 @@
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase": "^12.16.0",
-    "firebase-admin": "^14.2.0",
+    "firebase-admin": "13.10.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "react": "^19.0.1",
