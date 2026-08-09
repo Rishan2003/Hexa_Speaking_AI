@@ -9,6 +9,7 @@ import {
   createPaymentOrder,
   ensureDefaultPackages,
   getBillingSettings,
+  normalizeCreditCosts,
   getEntitlement,
   listActivePackages,
   listAllPackages,
@@ -20,7 +21,7 @@ import {
   type TestPackageRecord,
 } from './_billing.js';
 
-const API_REVISION = '1.2.4-paid-access-auth-interop-fix';
+const API_REVISION = '1.3.0-configurable-credit-costs';
 
 function setCommonHeaders(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');
@@ -386,6 +387,7 @@ export default async function handler(req: any, res: any) {
       const next = {
         ...current,
         signupFreeTests: Math.max(0, Math.floor(Number(body.signupFreeTests ?? current.signupFreeTests) || 0)),
+        creditCosts: normalizeCreditCosts(body.creditCosts ?? current.creditCosts),
         developmentPaymentsEnabled: body.developmentPaymentsEnabled == null ? current.developmentPaymentsEnabled : Boolean(body.developmentPaymentsEnabled),
         activeProvider: body.activeProvider === 'sslcommerz' ? 'sslcommerz' : 'development',
         updatedAt: Date.now(),

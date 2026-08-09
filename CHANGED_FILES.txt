@@ -1,4 +1,16 @@
+HEXA Speaking AI v1.3.0 — Configurable Credit Costs
+
+Replace these files:
+api/_billing.ts
+api/_billingHandler.ts
+api/billing.ts
 api/session-create.ts
-api/_sessionCreateHandler.ts
+api/session-mint.ts
+src/types.ts
+src/services/billingContext.tsx
+src/components/AdminBillingView.tsx
+src/components/BillingView.tsx
+src/components/DashboardView.tsx
 src/components/PracticeSetupView.tsx
-SESSION_RUNTIME_ISOLATION_FIX_v1.2.6.md
+
+No package.json change is required for this feature.

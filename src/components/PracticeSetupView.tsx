@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from '../services/routerContext';
 import { useAuth } from '../services/authContext';
+import { useBilling } from '../services/billingContext';
 import { MockPracticeService } from '../services/mockService';
 import { getFirebaseIdToken } from '../services/firebaseClient';
 import { CUE_CARDS_BANK, generateTestSnapshot } from '../services/questionBank';
@@ -27,9 +28,12 @@ import {
   RefreshCw
 } from 'lucide-react';
 
+const DEFAULT_CREDIT_COSTS = { part1: 1, part2: 1, part3: 1, full: 3 };
+
 export const PracticeSetupView: React.FC = () => {
   const { navigate, currentRoute } = useRouter();
   const { user } = useAuth();
+  const { entitlement, settings: billingSettings } = useBilling();
 
   // Mode Selection
   // Support pre-selected mode from parameters
@@ -37,6 +41,12 @@ export const PracticeSetupView: React.FC = () => {
   const initialMode = (params?.mode as 'full' | 'part1' | 'part2' | 'part3') || 'full';
   const [selectedMode, setSelectedMode] = useState<'full' | 'part1' | 'part2' | 'part3'>(initialMode);
   const [selectedCueCardId, setSelectedCueCardId] = useState(CUE_CARDS_BANK[0].id);
+  const creditCosts = { ...DEFAULT_CREDIT_COSTS, ...(billingSettings?.creditCosts || {}) };
+  const selectedCreditCost = creditCosts[selectedMode];
+  const unlimitedAccess = Boolean(entitlement?.unlimited && (!entitlement.unlimitedUntil || entitlement.unlimitedUntil > Date.now()));
+  const insufficientCredits = Boolean(
+    !APP_CONFIG.useMocks && entitlement && !unlimitedAccess && entitlement.creditBalance < selectedCreditCost,
+  );
 
   // Difficulty & Custom rules
   const [difficulty, setDifficulty] = useState<'standard' | 'supportive' | 'challenging'>('standard');
@@ -364,7 +374,7 @@ export const PracticeSetupView: React.FC = () => {
     } catch (err: any) {
       console.error('Error starting speaking session:', err);
       if (err?.code === 'PAYMENT_REQUIRED' || err?.status === 402) {
-        setPrecheckError('You have no speaking tests remaining. Choose a package to continue.');
+        setPrecheckError(err.message || `You need ${selectedCreditCost} credits for this practice type. Choose a credit package to continue.`);
         navigate('/billing');
       } else {
         setPrecheckError(err.message || 'Could not create a secure practice session. Please sign in again and retry.');
@@ -410,17 +420,21 @@ export const PracticeSetupView: React.FC = () => {
                 { id: 'full', title: 'Full Exam', desc: 'Complete 3-Part Mock' },
               ].map((mode) => {
                 const isSelected = selectedMode === mode.id;
+                const modeCost = creditCosts[mode.id as keyof typeof creditCosts];
                 return (
                   <button
                     key={mode.id}
                     onClick={() => setSelectedMode(mode.id as any)}
-                    className={`border text-left p-4 rounded-2xl transition cursor-pointer flex flex-col justify-between h-24 ${
+                    className={`border text-left p-4 rounded-2xl transition cursor-pointer flex flex-col justify-between h-28 ${
                       isSelected 
                         ? 'border-[var(--hexa-navy)] bg-[var(--hexa-soft-blue)] shadow-sm ring-1 ring-[rgba(47,51,127,.08)]' 
                         : 'border-gray-100 bg-white hover:bg-gray-50/30'
                     }`}
                   >
-                    <span className="text-xs font-black text-gray-950">{mode.title}</span>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-xs font-black text-gray-950">{mode.title}</span>
+                      <span className={`rounded-full px-2 py-1 text-[9px] font-black ${isSelected ? 'bg-[var(--hexa-navy)] text-white' : 'bg-slate-100 text-slate-500'}`}>{modeCost === 0 ? 'Free' : `${modeCost} Credit${modeCost === 1 ? '' : 's'}`}</span>
+                    </div>
                     <span className="text-gray-500 text-[10px] leading-tight font-medium">{mode.desc}</span>
                   </button>
                 );
@@ -714,10 +728,10 @@ export const PracticeSetupView: React.FC = () => {
           <div className="space-y-4">
             <button
               id="launch-mock-exam-btn"
-              disabled={micPermission !== 'granted' || launching}
+              disabled={micPermission !== 'granted' || launching || insufficientCredits}
               onClick={handleLaunchSession}
               className={`w-full flex items-center justify-center gap-2 font-black py-4 px-6 rounded-2xl transition duration-150 shadow-lg ${
-                micPermission !== 'granted'
+                micPermission !== 'granted' || insufficientCredits
                   ? 'bg-gray-100 text-gray-400 cursor-not-allowed shadow-none border border-gray-100'
                   : 'hexa-primary-btn text-white cursor-pointer'
               }`}
@@ -730,7 +744,7 @@ export const PracticeSetupView: React.FC = () => {
               ) : (
                 <>
                   <Play size={16} />
-                  <span>Start HEXA'S Practice Session</span>
+                  <span>{unlimitedAccess ? "Start HEXA'S Practice Session · Unlimited" : selectedCreditCost === 0 ? "Start HEXA'S Practice Session · Free" : `Start HEXA'S Practice Session · ${selectedCreditCost} Credit${selectedCreditCost === 1 ? '' : 's'}`}</span>
                 </>
               )}
             </button>
@@ -739,6 +753,11 @@ export const PracticeSetupView: React.FC = () => {
               <p className="text-center text-[10px] font-bold text-gray-400">
                 ⚠️ Calibration required: complete microphone precheck to enable start button.
               </p>
+            )}
+            {insufficientCredits && entitlement && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-[10px] font-bold text-amber-800">
+                This practice needs {selectedCreditCost} credits. You currently have {entitlement.creditBalance}. <button type="button" onClick={() => navigate('/billing')} className="ml-1 underline">Buy credits</button>
+              </div>
             )}
 
             {/* No Permanent Gemini Connection Disclaimer */}

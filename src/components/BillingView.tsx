@@ -35,7 +35,7 @@ export const BillingView: React.FC = () => {
         ? `Unlimited until ${new Date(entitlement.unlimitedUntil).toLocaleDateString()}`
         : 'Unlimited access';
     }
-    return `${entitlement.creditBalance} test${entitlement.creditBalance === 1 ? '' : 's'} remaining`;
+    return `${entitlement.creditBalance} credit${entitlement.creditBalance === 1 ? '' : 's'} available`;
   }, [entitlement]);
 
   const buy = async (pkg: TestPackage) => {
@@ -68,8 +68,8 @@ export const BillingView: React.FC = () => {
         <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-6">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/60">Test access</p>
-            <h1 className="mt-2 text-3xl font-black">Buy speaking tests</h1>
-            <p className="mt-2 max-w-xl text-sm text-white/70">Credits are attached to your account and checked securely before a new mock test can start.</p>
+            <h1 className="mt-2 text-3xl font-black">Buy speaking credits</h1>
+            <p className="mt-2 max-w-xl text-sm text-white/70">Credits are attached to your account. Different practice types can cost different amounts, and the server checks the required balance before launch.</p>
           </div>
           <div className="rounded-2xl bg-white/10 border border-white/10 px-5 py-4 min-w-[220px]">
             <span className="text-[10px] uppercase tracking-widest text-white/55 font-bold">Current access</span>
@@ -108,7 +108,7 @@ export const BillingView: React.FC = () => {
                 <h3 className="mt-4 text-base font-black text-slate-950">{pkg.name}</h3>
                 <p className="mt-1 text-xs leading-relaxed text-slate-500 flex-1">{pkg.description}</p>
                 <div className="mt-4 rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700">
-                  {pkg.accessType === 'unlimited' ? `Unlimited for ${pkg.unlimitedDays || 30} days` : `${pkg.tests} test credit${pkg.tests === 1 ? '' : 's'}`}
+                  {pkg.accessType === 'unlimited' ? `Unlimited for ${pkg.unlimitedDays || 30} days` : `${pkg.tests} credit${pkg.tests === 1 ? '' : 's'}`}
                 </div>
                 <button
                   onClick={() => void buy(pkg)}
@@ -137,7 +137,7 @@ export const BillingView: React.FC = () => {
           </section>
           <section className="rounded-3xl border border-[rgba(47,51,127,.15)] bg-[var(--hexa-soft-blue)] p-5">
             <div className="flex items-center gap-2 text-[var(--hexa-navy)]"><ShieldCheck size={18} /><h2 className="text-sm font-black">Protected credits</h2></div>
-            <p className="mt-2 text-xs leading-relaxed text-slate-600">A credit is reserved when a test is created and consumed only after the live examiner connects. Failed startup reservations can be returned automatically.</p>
+            <p className="mt-2 text-xs leading-relaxed text-slate-600">The required credits for that practice type are reserved when a session is created and consumed only after the live examiner connects. If startup fails, the full reserved amount is returned automatically.</p>
           </section>
         </aside>
       </section>

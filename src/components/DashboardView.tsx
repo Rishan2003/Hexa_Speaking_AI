@@ -65,7 +65,8 @@ const modeCards = [
 export const DashboardView: React.FC = () => {
   const { navigate } = useRouter();
   const { user } = useAuth();
-  const { entitlement, loading: billingLoading, refresh: refreshBilling } = useBilling();
+  const { entitlement, settings: billingSettings, loading: billingLoading, refresh: refreshBilling } = useBilling();
+  const creditCosts = { part1: 1, part2: 1, part3: 1, full: 3, ...(billingSettings?.creditCosts || {}) };
   const [sessions, setSessions] = useState<IELTSPracticeSession[]>([]);
   const [evaluations, setEvaluations] = useState<Record<string, IELTSEvaluation>>({});
   const [loading, setLoading] = useState(true);
@@ -205,13 +206,13 @@ export const DashboardView: React.FC = () => {
                   ? entitlement.unlimitedUntil
                     ? `Unlimited until ${new Date(entitlement.unlimitedUntil).toLocaleDateString()}`
                     : 'Unlimited speaking tests'
-                  : `${entitlement.creditBalance} test${entitlement.creditBalance === 1 ? '' : 's'} remaining`}
+                  : `${entitlement.creditBalance} credit${entitlement.creditBalance === 1 ? '' : 's'} available`}
             </h2>
-            <p className="mt-1 text-xs text-slate-500">Credits are verified securely whenever a new speaking test is created.</p>
+            <p className="mt-1 text-xs text-slate-500">Each practice type has its own credit cost, checked securely before a new session is created.</p>
           </div>
         </div>
         <button onClick={() => navigate('/billing')} className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-black text-white hover:bg-slate-800">
-          {entitlement && !entitlement.unlimited && entitlement.creditBalance === 0 ? 'Buy a test' : 'Manage test access'}
+          {entitlement && !entitlement.unlimited && entitlement.creditBalance === 0 ? 'Buy credits' : 'Manage credits'}
         </button>
       </section>
 
@@ -257,7 +258,7 @@ export const DashboardView: React.FC = () => {
                     <p className={`mt-1.5 text-xs leading-relaxed ${featured ? 'text-white/68' : 'text-slate-500'}`}>{description}</p>
                     <div className={`mt-4 flex items-center justify-between text-[10px] font-bold ${featured ? 'text-white/60' : 'text-slate-400'}`}>
                       <span className="inline-flex items-center gap-1.5"><Clock size={12} /> {duration}</span>
-                      <ArrowRight size={14} className="transition-transform group-hover:translate-x-1" />
+                      <span className="inline-flex items-center gap-2"><span>{creditCosts[mode] === 0 ? 'Free' : `${creditCosts[mode]} cr`}</span><ArrowRight size={14} className="transition-transform group-hover:translate-x-1" /></span>
                     </div>
                   </button>
                 ))}

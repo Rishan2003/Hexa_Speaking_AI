@@ -1,4 +1,4 @@
-const API_REVISION = '1.2.9-paid-mint-direct-firestore-auth';
+const API_REVISION = '1.3.0-paid-mint-credit-cost-aware';
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
 function makeRequestId() {
@@ -126,14 +126,15 @@ async function releaseExpiredReservation(db: any, userId: string, sessionId: str
 
     let balanceAfter = Number(entitlementSnap.data()?.creditBalance) || 0;
     if (reservation.chargeType === 'credit' && entitlementSnap.exists) {
-      balanceAfter += 1;
+      const refundCredits = Math.max(0, Number(reservation.creditCost ?? 1) || 0);
+      balanceAfter += refundCredits;
       tx.update(entitlementRef, { creditBalance: balanceAfter, updatedAt: now });
       tx.set(ledgerRef, {
         id: `release-${sessionId}`,
         userId,
         sessionId,
         type: 'TEST_RESERVATION_RELEASED',
-        delta: 1,
+        delta: refundCredits,
         balanceAfter,
         note: 'Reservation expired before Gemini token authorization.',
         createdAt: now,

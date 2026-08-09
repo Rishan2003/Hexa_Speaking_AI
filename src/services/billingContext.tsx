@@ -34,6 +34,7 @@ function mockBilling(): Omit<BillingContextValue, 'refresh'> {
     packages: [],
     settings: {
       signupFreeTests: 3,
+      creditCosts: { part1: 1, part2: 1, part3: 1, full: 3 },
       currency: 'BDT',
       developmentPaymentsEnabled: true,
       activeProvider: 'development',

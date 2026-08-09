@@ -3,9 +3,18 @@ import { ensureSessionFirebaseAdmin } from './_firebaseSessionAdminLazy.js';
 
 export type AccessType = 'credits' | 'unlimited';
 export type PaymentProvider = 'development' | 'sslcommerz';
+export type PracticeMode = 'full' | 'part1' | 'part2' | 'part3';
+
+export interface TestCreditCostsRecord {
+  part1: number;
+  part2: number;
+  part3: number;
+  full: number;
+}
 
 export interface BillingSettingsRecord {
   signupFreeTests: number;
+  creditCosts: TestCreditCostsRecord;
   currency: 'BDT';
   developmentPaymentsEnabled: boolean;
   activeProvider: PaymentProvider;
@@ -39,13 +48,35 @@ export interface TestPackageRecord {
 }
 
 const DEFAULT_FREE_TESTS = Math.max(0, Number(process.env.DEFAULT_FREE_TESTS || 3) || 3);
+const DEFAULT_CREDIT_COSTS: TestCreditCostsRecord = { part1: 1, part2: 1, part3: 1, full: 3 };
 const RESERVATION_TTL_MS = 20 * 60 * 1000;
+
+function safeCreditCost(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : fallback;
+}
+
+export function normalizeCreditCosts(raw: any): TestCreditCostsRecord {
+  return {
+    part1: safeCreditCost(raw?.part1, DEFAULT_CREDIT_COSTS.part1),
+    part2: safeCreditCost(raw?.part2, DEFAULT_CREDIT_COSTS.part2),
+    part3: safeCreditCost(raw?.part3, DEFAULT_CREDIT_COSTS.part3),
+    full: safeCreditCost(raw?.full, DEFAULT_CREDIT_COSTS.full),
+  };
+}
+
+export function creditCostForMode(settings: Pick<BillingSettingsRecord, 'creditCosts'>, mode: string): number {
+  const costs = normalizeCreditCosts(settings?.creditCosts);
+  if (mode === 'part1' || mode === 'part2' || mode === 'part3' || mode === 'full') return costs[mode];
+  return costs.full;
+}
 
 export function defaultBillingSettings(): BillingSettingsRecord {
   const developmentPaymentsEnabled = process.env.ALLOW_DEVELOPMENT_PAYMENTS === 'true';
   const sslConfigured = Boolean(process.env.SSLCOMMERZ_STORE_ID && process.env.SSLCOMMERZ_STORE_PASSWORD);
   return {
     signupFreeTests: DEFAULT_FREE_TESTS,
+    creditCosts: { ...DEFAULT_CREDIT_COSTS },
     currency: 'BDT',
     developmentPaymentsEnabled,
     activeProvider: sslConfigured ? 'sslcommerz' : 'development',
@@ -67,6 +98,7 @@ export async function getBillingSettings(): Promise<BillingSettingsRecord> {
     const defaults = defaultBillingSettings();
     return {
       signupFreeTests: Math.max(0, Number(data.signupFreeTests ?? defaults.signupFreeTests) || 0),
+      creditCosts: normalizeCreditCosts(data.creditCosts ?? defaults.creditCosts),
       currency: 'BDT',
       developmentPaymentsEnabled: Boolean(data.developmentPaymentsEnabled ?? defaults.developmentPaymentsEnabled),
       activeProvider: data.activeProvider === 'sslcommerz' ? 'sslcommerz' : 'development',
@@ -89,7 +121,7 @@ export async function ensureDefaultPackages(): Promise<void> {
     {
       id: 'single-test',
       name: 'Single Test',
-      description: 'One complete HEXA speaking test credit.',
+      description: 'One HEXA speaking credit for flexible practice use.',
       accessType: 'credits',
       tests: 1,
       unlimitedDays: null,
@@ -102,7 +134,7 @@ export async function ensureDefaultPackages(): Promise<void> {
     {
       id: 'starter-5',
       name: 'Starter 5',
-      description: 'Five speaking test credits at a lower per-test price.',
+      description: 'Five speaking credits at a lower per-credit price.',
       accessType: 'credits',
       tests: 5,
       unlimitedDays: null,
@@ -115,7 +147,7 @@ export async function ensureDefaultPackages(): Promise<void> {
     {
       id: 'standard-10',
       name: 'Standard 10',
-      description: 'Ten speaking test credits for regular practice.',
+      description: 'Ten speaking credits for regular practice.',
       accessType: 'credits',
       tests: 10,
       unlimitedDays: null,
@@ -204,7 +236,7 @@ export async function ensureEntitlement(userId: string): Promise<TestEntitlement
         type: 'SIGNUP_BONUS',
         delta: signupFreeTests,
         balanceAfter: signupFreeTests,
-        note: 'Automatic free-test allowance for a new account.',
+        note: 'Automatic free-credit allowance for a new account.',
         createdAt: now,
       });
     }
@@ -236,16 +268,20 @@ export async function getEntitlement(userId: string): Promise<TestEntitlementRec
   return entitlement;
 }
 
-function paymentRequiredError() {
-  const error: any = new Error('No speaking test credits remain. Purchase a test package or ask an administrator for access.');
+function paymentRequiredError(requiredCredits: number, availableCredits: number) {
+  const error: any = new Error(`This test requires ${requiredCredits} credit${requiredCredits === 1 ? '' : 's'}, but your balance is ${availableCredits}.`);
   error.httpStatus = 402;
   error.publicCode = 'PAYMENT_REQUIRED';
+  error.requiredCredits = requiredCredits;
+  error.availableCredits = availableCredits;
   return error;
 }
 
 export async function reserveTestCredit(userId: string, sessionId: string, mode: string) {
   await releaseExpiredReservationsForUser(userId).catch(() => undefined);
   await ensureEntitlement(userId);
+  const settings = await getBillingSettings();
+  const creditCost = creditCostForMode(settings, mode);
   const { db } = await ensureSessionFirebaseAdmin();
   const entitlementRef = db.collection('testEntitlements').doc(userId);
   const reservationRef = db.collection('testReservations').doc(sessionId);
@@ -264,6 +300,7 @@ export async function reserveTestCredit(userId: string, sessionId: string, mode:
         userId,
         mode,
         chargeType: 'unlimited',
+        creditCost,
         status: 'reserved',
         reservedAt: now,
         expiresAt: now + RESERVATION_TTL_MS,
@@ -273,16 +310,17 @@ export async function reserveTestCredit(userId: string, sessionId: string, mode:
     }
 
     const balance = Math.max(0, Number(entitlement.creditBalance) || 0);
-    if (balance < 1) throw paymentRequiredError();
+    if (balance < creditCost) throw paymentRequiredError(creditCost, balance);
 
-    const nextBalance = balance - 1;
-    tx.update(entitlementRef, { creditBalance: nextBalance, updatedAt: now });
+    const nextBalance = balance - creditCost;
+    if (creditCost > 0) tx.update(entitlementRef, { creditBalance: nextBalance, updatedAt: now });
     const reservation = {
       id: sessionId,
       sessionId,
       userId,
       mode,
-      chargeType: 'credit',
+      chargeType: creditCost > 0 ? 'credit' : 'free',
+      creditCost,
       status: 'reserved',
       reservedAt: now,
       expiresAt: now + RESERVATION_TTL_MS,
@@ -293,9 +331,9 @@ export async function reserveTestCredit(userId: string, sessionId: string, mode:
       userId,
       sessionId,
       type: 'TEST_RESERVED',
-      delta: -1,
+      delta: -creditCost,
       balanceAfter: nextBalance,
-      note: `Reserved for ${mode} speaking test.`,
+      note: `${creditCost} credit${creditCost === 1 ? '' : 's'} reserved for ${mode} speaking test.`,
       createdAt: now,
     });
     return reservation;
@@ -333,7 +371,8 @@ export async function consumeReservation(userId: string, sessionId: string) {
     }
 
     const entitlement = entSnap.data() as TestEntitlementRecord;
-    const totalConsumed = (Number(entitlement.totalConsumed) || 0) + 1;
+    const creditCost = reservation.chargeType === 'credit' ? Math.max(0, Number(reservation.creditCost ?? 1) || 0) : 0;
+    const totalConsumed = (Number(entitlement.totalConsumed) || 0) + creditCost;
     tx.update(entitlementRef, { totalConsumed, updatedAt: now });
     tx.update(reservationRef, { status: 'consumed', consumedAt: now });
     tx.set(ledgerRef, {
@@ -343,7 +382,9 @@ export async function consumeReservation(userId: string, sessionId: string) {
       type: 'TEST_CONSUMED',
       delta: 0,
       balanceAfter: Number(entitlement.creditBalance) || 0,
-      note: 'Reserved test credit consumed after live examiner connection.',
+      note: creditCost > 0
+        ? `${creditCost} reserved credit${creditCost === 1 ? '' : 's'} consumed after live examiner connection.`
+        : 'No credits consumed for this test.',
       createdAt: now,
     });
     return { ...reservation, status: 'consumed', consumedAt: now };
@@ -366,14 +407,15 @@ export async function releaseReservation(userId: string, sessionId: string, note
 
     if (reservation.chargeType === 'credit') {
       const entitlement = entSnap.data() as TestEntitlementRecord;
-      const nextBalance = Math.max(0, Number(entitlement.creditBalance) || 0) + 1;
+      const refundCredits = Math.max(0, Number(reservation.creditCost ?? 1) || 0);
+      const nextBalance = Math.max(0, Number(entitlement.creditBalance) || 0) + refundCredits;
       tx.update(entitlementRef, { creditBalance: nextBalance, updatedAt: now });
       tx.set(ledgerRef, {
         id: `release-${sessionId}`,
         userId,
         sessionId,
         type: 'TEST_RELEASED',
-        delta: 1,
+        delta: refundCredits,
         balanceAfter: nextBalance,
         note,
         createdAt: now,
@@ -511,7 +553,7 @@ export async function adminGrantCredits(adminUid: string, userId: string, amount
       type: 'ADMIN_GRANT',
       delta: safeAmount,
       balanceAfter: nextBalance,
-      note: note || 'Free test credit granted by administrator.',
+      note: note || 'Free credit granted by administrator.',
       createdAt: now,
     });
     return { ...entitlement, creditBalance: nextBalance, updatedAt: now };

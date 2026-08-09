@@ -6,7 +6,7 @@
  * returns diagnostic JSON instead of FUNCTION_INVOCATION_FAILED.
  */
 
-const API_REVISION = '1.2.4-billing-auth-interop-fix';
+const API_REVISION = '1.3.0-billing-configurable-credit-costs';
 
 function setHeaders(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store');

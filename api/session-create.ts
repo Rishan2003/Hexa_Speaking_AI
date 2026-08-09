@@ -1,4 +1,4 @@
-const API_REVISION = '1.2.7-session-self-contained';
+const API_REVISION = '1.3.0-session-configurable-credit-costs';
 const RESERVATION_TTL_MS = 20 * 60 * 1000;
 
 type PracticeMode = 'full' | 'part1' | 'part2' | 'part3';
@@ -252,6 +252,18 @@ function defaultSignupFreeTests() {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 3;
 }
 
+const DEFAULT_CREDIT_COSTS: Record<PracticeMode, number> = { part1: 1, part2: 1, part3: 1, full: 3 };
+
+function safeCreditCost(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : fallback;
+}
+
+function creditCostForMode(settingsData: any, mode: PracticeMode): number {
+  const raw = settingsData?.creditCosts || {};
+  return safeCreditCost(raw?.[mode], DEFAULT_CREDIT_COSTS[mode]);
+}
+
 async function reserveTestCredit(userId: string, sessionId: string, mode: PracticeMode) {
   const { db } = await ensureFirestoreAdmin();
   const entitlementRef = db.collection('testEntitlements').doc(userId);
@@ -269,6 +281,8 @@ async function reserveTestCredit(userId: string, sessionId: string, mode: Practi
     ]);
 
     if (reservationSnap.exists) return reservationSnap.data();
+
+    const creditCost = creditCostForMode(settingsSnap.exists ? settingsSnap.data() : null, mode);
 
     let entitlement: any;
     let newlyCreated = false;
@@ -299,6 +313,7 @@ async function reserveTestCredit(userId: string, sessionId: string, mode: Practi
         userId,
         mode,
         chargeType: 'unlimited',
+        creditCost,
         status: 'reserved',
         reservedAt: now,
         expiresAt: now + RESERVATION_TTL_MS,
@@ -312,7 +327,7 @@ async function reserveTestCredit(userId: string, sessionId: string, mode: Practi
             type: 'SIGNUP_BONUS',
             delta: Number(entitlement.creditBalance),
             balanceAfter: Number(entitlement.creditBalance),
-            note: 'Automatic free-test allowance for a new account.',
+            note: 'Automatic free-credit allowance for a new account.',
             createdAt: now,
           });
         }
@@ -322,11 +337,15 @@ async function reserveTestCredit(userId: string, sessionId: string, mode: Practi
     }
 
     const balance = Math.max(0, Number(entitlement.creditBalance) || 0);
-    if (balance < 1) {
-      throw makeError('No speaking test credits remain. Purchase a test package or ask an administrator for access.', 'PAYMENT_REQUIRED', 402);
+    if (balance < creditCost) {
+      throw makeError(
+        `This ${mode} test requires ${creditCost} credit${creditCost === 1 ? '' : 's'}, but your balance is ${balance}.`,
+        'PAYMENT_REQUIRED',
+        402,
+      );
     }
 
-    const nextBalance = balance - 1;
+    const nextBalance = balance - creditCost;
     if (newlyCreated) {
       tx.set(entitlementRef, { ...entitlement, creditBalance: nextBalance, updatedAt: now });
       if (balance > 0) {
@@ -336,11 +355,11 @@ async function reserveTestCredit(userId: string, sessionId: string, mode: Practi
           type: 'SIGNUP_BONUS',
           delta: balance,
           balanceAfter: balance,
-          note: 'Automatic free-test allowance for a new account.',
+          note: 'Automatic free-credit allowance for a new account.',
           createdAt: now,
         });
       }
-    } else {
+    } else if (creditCost > 0) {
       tx.update(entitlementRef, { creditBalance: nextBalance, updatedAt: now });
     }
 
@@ -349,7 +368,8 @@ async function reserveTestCredit(userId: string, sessionId: string, mode: Practi
       sessionId,
       userId,
       mode,
-      chargeType: 'credit',
+      chargeType: creditCost > 0 ? 'credit' : 'free',
+      creditCost,
       status: 'reserved',
       reservedAt: now,
       expiresAt: now + RESERVATION_TTL_MS,
@@ -360,9 +380,9 @@ async function reserveTestCredit(userId: string, sessionId: string, mode: Practi
       userId,
       sessionId,
       type: 'TEST_RESERVED',
-      delta: -1,
+      delta: -creditCost,
       balanceAfter: nextBalance,
-      note: `Reserved for ${mode} speaking test.`,
+      note: `${creditCost} credit${creditCost === 1 ? '' : 's'} reserved for ${mode} speaking test.`,
       createdAt: now,
     });
     return reservation;
@@ -387,14 +407,15 @@ async function releaseReservation(userId: string, sessionId: string, note: strin
 
     let balanceAfter = Number(entitlementSnap.data()?.creditBalance) || 0;
     if (reservation.chargeType === 'credit' && entitlementSnap.exists) {
-      balanceAfter += 1;
+      const refundCredits = Math.max(0, Number(reservation.creditCost ?? 1) || 0);
+      balanceAfter += refundCredits;
       tx.update(entitlementRef, { creditBalance: balanceAfter, updatedAt: now });
       tx.set(ledgerRef, {
         id: `release-${sessionId}`,
         userId,
         sessionId,
         type: 'TEST_RESERVATION_RELEASED',
-        delta: 1,
+        delta: refundCredits,
         balanceAfter,
         note,
         createdAt: now,
