@@ -169,8 +169,9 @@ async function requestTts(
             text:
               'Read exactly the Bangla feedback below. ' +
               continuityHint +
-              'Use natural Bangladeshi Bangla, a warm and calm IELTS-teacher tone, a clear moderate pace, and natural short pauses. ' +
-              'Do not summarize, paraphrase, add an introduction, add a conclusion, or read these instructions aloud.\n\n' +
+              'Use the voice of a modern Bangladeshi IELTS teacher: warm, calm, conversational, and natural, with a clear moderate pace and natural short pauses. ' +
+              'The script may mix Bangla and common English IELTS/coaching words. Preserve those English words exactly and pronounce them naturally in English inside the Bangla sentence; do not translate them into formal Bangla. ' +
+              'Avoid a formal newsreader or textbook delivery. Do not summarize, paraphrase, add an introduction, add a conclusion, or read these instructions aloud.\n\n' +
               text,
           }],
         }],
