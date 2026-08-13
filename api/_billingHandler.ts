@@ -343,7 +343,10 @@ export default async function handler(req: any, res: any) {
       const owned = reservation.userId === decoded.uid && session.userId === decoded.uid;
       const linked = session.billingReservationId === sessionId && reservation.sessionId === sessionId;
       const activeReservation = reservation.status === 'reserved' || reservation.status === 'consumed';
-      const activeSession = session.status === 'active';
+      // Legacy v1.3.0 clients may have marked an otherwise live session as
+      // incomplete from a stale IDLE callback. Allow that non-terminal state
+      // to resume/mint, while completed/abandoned/failed remain blocked.
+      const activeSession = session.status === 'active' || session.status === 'incomplete';
 
       if (!owned || !linked || !activeReservation || !activeSession) {
         return res.status(403).json({ error: 'This live session is not authorized for paid access.', code: 'PAID_SESSION_NOT_AUTHORIZED' });

@@ -1,4 +1,4 @@
-const API_REVISION = '1.3.0-paid-mint-credit-cost-aware';
+const API_REVISION = '1.3.1-full-test-part-rotation-fix';
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
 function makeRequestId() {
@@ -164,7 +164,10 @@ async function authorizePaidSession(userId: string, sessionId: string) {
   const owned = reservation.userId === userId && session.userId === userId;
   const linked = session.billingReservationId === sessionId && reservation.sessionId === sessionId;
   const activeReservation = reservation.status === 'reserved' || reservation.status === 'consumed';
-  const activeSession = session.status === 'active';
+  // v1.3.0 clients could persist a stale IDLE callback as status=incomplete
+  // during Part 1. Treat that legacy non-terminal status as resumable so the
+  // same paid session can mint the fresh Part 2/3 connection token.
+  const activeSession = session.status === 'active' || session.status === 'incomplete';
 
   if (!owned || !linked || !activeReservation || !activeSession) {
     return { ok: false, status: 403, code: 'PAID_SESSION_NOT_AUTHORIZED', error: 'This live session is not authorized for paid access.' };

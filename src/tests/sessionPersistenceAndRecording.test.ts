@@ -98,6 +98,18 @@ describe('Phase 11 - Session Persistence & Private Recording Upload', () => {
       expect(restored?.status).toBe('completed');
     });
 
+    it('keeps ExamState.IDLE as active so a stale live callback cannot block Part 2 token minting', async () => {
+      await FirebaseRepository.updateSessionState(
+        testSession.id,
+        ExamState.IDLE,
+        IELTSExamPart.PART_1,
+        []
+      );
+
+      const restored = MockPracticeService.getSessionById(testSession.id);
+      expect(restored?.status).toBe('active');
+    });
+
     it('maps ExamState.ABANDONED to "abandoned"', async () => {
       await FirebaseRepository.updateSessionState(
         testSession.id,

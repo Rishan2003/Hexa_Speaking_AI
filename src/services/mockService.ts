@@ -278,9 +278,9 @@ export const MockPracticeService = {
       sessions[idx].status = 'abandoned';
     } else if (state === ExamState.FAILED) {
       sessions[idx].status = 'failed';
-    } else if (state === ExamState.IDLE) {
-      sessions[idx].status = 'incomplete';
     } else {
+      // IDLE is non-terminal; keep the session active so full-test provider
+      // rotations cannot be invalidated by a stale startup-state callback.
       sessions[idx].status = 'active';
     }
 

@@ -238,9 +238,10 @@ export const FirebaseRepository = {
       mappedStatus = 'abandoned';
     } else if (state === ExamState.FAILED) {
       mappedStatus = 'failed';
-    } else if (state === ExamState.IDLE) {
-      mappedStatus = 'incomplete';
     }
+    // IDLE is a non-terminal startup/recovery state. Keeping it active is
+    // important because Gemini Live mints a fresh token when a full test
+    // rotates from Part 1 -> Part 2 -> Part 3.
 
     if (shouldUseLocalSandbox()) {
       MockPracticeService.updateSessionState(sessionId, state, part, transcript || [], part2Meta, draftNotes);

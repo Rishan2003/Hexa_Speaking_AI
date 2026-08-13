@@ -75,6 +75,10 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
   const [showEndModal, setShowEndModal] = useState(false);
 
   const voiceProviderRef = useRef<RealtimeVoiceProvider | null>(null);
+  // Gemini provider callbacks outlive the React render that created them. Keep
+  // the latest exam state in a ref so transcript persistence never writes a
+  // stale IDLE state during full-test part rotation.
+  const currentStateRef = useRef<ExamState>(ExamState.IDLE);
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const part2PrepExpiryTriggeredRef = useRef(false);
@@ -118,6 +122,11 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
       voiceProviderRef.current?.sendAudio(chunk);
     }
   });
+
+  // Keep long-lived provider callbacks synchronized with the latest state.
+  useEffect(() => {
+    currentStateRef.current = currentState;
+  }, [currentState]);
 
   // Track continuous session elapsed timer
   useEffect(() => {
@@ -722,14 +731,15 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
       };
       const updated = [...prev, newChunk];
       if (session) {
-        MockPracticeService.updateSessionState(session.id, currentState, sourcePart, updated);
+        const persistedState = currentStateRef.current;
+        MockPracticeService.updateSessionState(session.id, persistedState, sourcePart, updated);
         const partId = sourcePart === IELTSExamPart.PART_1
           ? 'part-1'
           : sourcePart === IELTSExamPart.PART_2
             ? 'part-2'
             : 'part-3';
         persistenceQueue.saveTurn(session.id, partId, newChunk);
-        persistenceQueue.updateSessionState(session.id, currentState, sourcePart, updated);
+        persistenceQueue.updateSessionState(session.id, persistedState, sourcePart, updated);
       }
       return updated;
     });
