@@ -655,7 +655,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--hexa-navy)] hover:opacity-90 text-white rounded-lg text-xs font-semibold transition cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--hexa-navy)]/20"
           >
             <Download size={13} />
-            Download Feedback PDF
+            Download 1-Page Feedback
           </button>
           <button
             id="re-evaluate-btn"
