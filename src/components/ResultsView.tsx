@@ -11,6 +11,8 @@ import { RecordingUploadService } from '../services/recordingUploadService';
 import { EvaluationApiService } from '../services/evaluationApiService';
 import { FirebaseRepository } from '../services/firebaseRepository';
 import { VoiceFeedbackService } from '../services/voiceFeedbackService';
+import { FeedbackPdfService } from '../services/feedbackPdfService';
+import { useAuth } from '../services/authContext';
 import { 
   AlertTriangle, 
   ArrowLeft, 
@@ -36,7 +38,8 @@ import {
   Loader2,
   Play,
   Pause,
-  Radio
+  Radio,
+  Download
 } from 'lucide-react';
 
 interface ResultsViewProps {
@@ -59,6 +62,7 @@ async function settleWithin<T>(promise: Promise<T>, timeoutMs: number, fallback:
 
 export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
   const { navigate } = useRouter();
+  const { user } = useAuth();
   const [session, setSession] = useState<IELTSPracticeSession | null>(null);
   const [evaluation, setEvaluation] = useState<IELTSEvaluation | null>(null);
   const [completedGoals, setCompletedGoals] = useState<Record<number, boolean>>({});
@@ -74,6 +78,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
   const [isVoicePlaying, setIsVoicePlaying] = useState(false);
   const [isListeningForVoiceAnswer, setIsListeningForVoiceAnswer] = useState(false);
   const [voiceAutoplayBlocked, setVoiceAutoplayBlocked] = useState(false);
+  const [pdfDownloadError, setPdfDownloadError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<any>(null);
   const promptedEvaluationRef = useRef<string | null>(null);
@@ -606,6 +611,21 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
     );
   }
 
+  const handleDownloadFeedbackPdf = () => {
+    if (!session || !evaluation) return;
+    try {
+      setPdfDownloadError(null);
+      FeedbackPdfService.downloadFeedbackReport({
+        evaluation,
+        session,
+        candidateName: user?.displayName || user?.email || 'IELTS Candidate',
+      });
+    } catch (error: any) {
+      console.error('[ResultsView] Feedback PDF download failed:', error);
+      setPdfDownloadError(error?.message || 'Could not create the feedback PDF. Please try again.');
+    }
+  };
+
   const isPronunciationAssessed = evaluation.criteria.pronunciation.status === 'assessed' && evaluation.criteria.pronunciation.score > 0;
   const isPronunciationAssumed = evaluation.criteria.pronunciation.status === 'assumed' && evaluation.criteria.pronunciation.score > 0;
   const isPronunciationUnavailable = !isPronunciationAssessed && !isPronunciationAssumed;
@@ -627,7 +647,16 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
           <ArrowLeft size={14} /> Back to Dashboard
         </button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            id="download-feedback-pdf-btn"
+            type="button"
+            onClick={handleDownloadFeedbackPdf}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--hexa-navy)] hover:opacity-90 text-white rounded-lg text-xs font-semibold transition cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--hexa-navy)]/20"
+          >
+            <Download size={13} />
+            Download Feedback PDF
+          </button>
           <button
             id="re-evaluate-btn"
             onClick={handleReEvaluate}
@@ -639,6 +668,13 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
           </button>
         </div>
       </nav>
+
+      {pdfDownloadError && (
+        <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-800">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <span>{pdfDownloadError}</span>
+        </div>
+      )}
 
       {/* Prominent Overall Estimated Practice Band & Confidence Banner */}
       <section 
