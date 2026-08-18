@@ -13,6 +13,7 @@ import { FirebaseRepository } from '../services/firebaseRepository';
 import { VoiceFeedbackService } from '../services/voiceFeedbackService';
 import { FeedbackPdfService } from '../services/feedbackPdfService';
 import { useAuth } from '../services/authContext';
+import { useBilling } from '../services/billingContext';
 import { 
   AlertTriangle, 
   ArrowLeft, 
@@ -62,6 +63,7 @@ async function settleWithin<T>(promise: Promise<T>, timeoutMs: number, fallback:
 export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
   const { navigate } = useRouter();
   const { user } = useAuth();
+  const { isAdmin, loading: billingLoading } = useBilling();
   const [session, setSession] = useState<IELTSPracticeSession | null>(null);
   const [evaluation, setEvaluation] = useState<IELTSEvaluation | null>(null);
   const [completedGoals, setCompletedGoals] = useState<Record<number, boolean>>({});
@@ -78,10 +80,46 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
   const [isListeningForVoiceAnswer, setIsListeningForVoiceAnswer] = useState(false);
   const [voiceAutoplayBlocked, setVoiceAutoplayBlocked] = useState(false);
   const [pdfDownloadError, setPdfDownloadError] = useState<string | null>(null);
+  const [candidateReportName, setCandidateReportName] = useState('');
+  const [candidateNumber, setCandidateNumber] = useState('');
+  const [candidateDetailsConfirmed, setCandidateDetailsConfirmed] = useState(false);
+  const [candidateDetailsError, setCandidateDetailsError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<any>(null);
   const promptedEvaluationRef = useRef<string | null>(null);
   const voicePromptActiveRef = useRef(false);
+
+  useEffect(() => {
+    setCandidateDetailsError(null);
+
+    if (!sessionId || !isAdmin) {
+      setCandidateReportName('');
+      setCandidateNumber('');
+      setCandidateDetailsConfirmed(false);
+      return;
+    }
+
+    try {
+      const raw = localStorage.getItem(`hexa_admin_candidate_feedback_v1:${sessionId}`);
+      if (raw) {
+        const saved = JSON.parse(raw) as { name?: string; candidateNumber?: string };
+        const savedName = String(saved?.name || '').trim();
+        const savedNumber = String(saved?.candidateNumber || '').trim();
+        if (savedName && savedNumber) {
+          setCandidateReportName(savedName);
+          setCandidateNumber(savedNumber);
+          setCandidateDetailsConfirmed(true);
+          return;
+        }
+      }
+    } catch {
+      // Browser storage is optional; the admin can still enter the details manually.
+    }
+
+    setCandidateReportName('');
+    setCandidateNumber('');
+    setCandidateDetailsConfirmed(false);
+  }, [sessionId, isAdmin]);
 
   useEffect(() => {
     let isMounted = true;
@@ -610,6 +648,126 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
     );
   }
 
+  const handleConfirmAdminCandidateDetails = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextName = candidateReportName.trim();
+    const nextNumber = candidateNumber.trim();
+
+    if (!nextName) {
+      setCandidateDetailsError('Enter the candidate name before continuing.');
+      return;
+    }
+    if (!nextNumber) {
+      setCandidateDetailsError('Enter the candidate number before continuing.');
+      return;
+    }
+
+    setCandidateReportName(nextName);
+    setCandidateNumber(nextNumber);
+    setCandidateDetailsError(null);
+    setCandidateDetailsConfirmed(true);
+
+    if (sessionId) {
+      try {
+        localStorage.setItem(
+          `hexa_admin_candidate_feedback_v1:${sessionId}`,
+          JSON.stringify({ name: nextName, candidateNumber: nextNumber })
+        );
+      } catch {
+        // Feedback can continue even if browser storage is unavailable.
+      }
+    }
+  };
+
+  const handleEditAdminCandidateDetails = () => {
+    setCandidateDetailsError(null);
+    setCandidateDetailsConfirmed(false);
+  };
+
+  if (billingLoading) {
+    return (
+      <main className="max-w-md mx-auto text-center py-16 font-sans space-y-3">
+        <Loader2 size={24} className="animate-spin mx-auto text-[var(--hexa-navy)]" />
+        <p className="text-gray-500 text-xs">Preparing feedback access...</p>
+      </main>
+    );
+  }
+
+  if (isAdmin && !candidateDetailsConfirmed) {
+    return (
+      <main className="max-w-xl mx-auto py-10 sm:py-14 px-4 font-sans">
+        <button
+          type="button"
+          onClick={() => navigate('/dashboard')}
+          className="mb-5 inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-gray-900 cursor-pointer"
+        >
+          <ArrowLeft size={14} /> Back to Dashboard
+        </button>
+
+        <section className="rounded-[2rem] border border-gray-200 bg-white shadow-xl overflow-hidden">
+          <div className="hexa-brand-panel px-6 sm:px-8 py-6 text-white">
+            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/65">Admin feedback setup</span>
+            <h1 className="mt-2 text-2xl font-black tracking-tight">Candidate Details</h1>
+            <p className="mt-2 text-xs leading-relaxed text-white/70 max-w-md">
+              Enter the candidate information that should appear on this feedback report. This step is available only to administrator accounts.
+            </p>
+          </div>
+
+          <form onSubmit={handleConfirmAdminCandidateDetails} className="p-6 sm:p-8 space-y-5">
+            <div>
+              <label htmlFor="admin-feedback-candidate-name" className="block text-xs font-extrabold text-gray-800 mb-2">
+                Candidate Name
+              </label>
+              <input
+                id="admin-feedback-candidate-name"
+                type="text"
+                autoComplete="off"
+                value={candidateReportName}
+                onChange={(event) => setCandidateReportName(event.target.value)}
+                maxLength={80}
+                placeholder="e.g. Mohammad Hasan"
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-950 outline-none transition focus:border-[var(--hexa-navy)] focus:bg-white focus:ring-2 focus:ring-[var(--hexa-navy)]/10"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="admin-feedback-candidate-number" className="block text-xs font-extrabold text-gray-800 mb-2">
+                Candidate Number
+              </label>
+              <input
+                id="admin-feedback-candidate-number"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                value={candidateNumber}
+                onChange={(event) => setCandidateNumber(event.target.value)}
+                maxLength={40}
+                placeholder="e.g. 004512"
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-950 outline-none transition focus:border-[var(--hexa-navy)] focus:bg-white focus:ring-2 focus:ring-[var(--hexa-navy)]/10"
+              />
+            </div>
+
+            {candidateDetailsError && (
+              <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-800">
+                <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                <span>{candidateDetailsError}</span>
+              </div>
+            )}
+
+            <button
+              id="admin-feedback-candidate-continue-btn"
+              type="submit"
+              className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--hexa-navy)] px-4 py-3 text-sm font-extrabold text-white transition hover:opacity-90 cursor-pointer"
+            >
+              <FileText size={16} />
+              Continue to Feedback
+            </button>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
   const handleDownloadFeedbackPdf = () => {
     if (!session || !evaluation) return;
     try {
@@ -617,7 +775,10 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
       FeedbackPdfService.downloadFeedbackReport({
         evaluation,
         session,
-        candidateName: user?.displayName || user?.email || 'IELTS Candidate',
+        candidateName: isAdmin
+          ? candidateReportName
+          : (user?.displayName || user?.email || 'IELTS Candidate'),
+        candidateNumber: isAdmin ? candidateNumber : undefined,
       });
     } catch (error: any) {
       console.error('[ResultsView] Feedback PDF download failed:', error);
@@ -644,6 +805,17 @@ export const ResultsView: React.FC<ResultsViewProps> = ({ sessionId }) => {
         </button>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {isAdmin && (
+            <button
+              id="edit-feedback-candidate-details-btn"
+              type="button"
+              onClick={handleEditAdminCandidateDetails}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold transition cursor-pointer focus:outline-none focus:ring-2 focus:ring-gray-200"
+            >
+              <FileText size={13} />
+              Edit Candidate Details
+            </button>
+          )}
           <button
             id="download-feedback-pdf-btn"
             type="button"

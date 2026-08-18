@@ -4,6 +4,7 @@ interface FeedbackPdfInput {
   evaluation: IELTSEvaluation;
   session: IELTSPracticeSession;
   candidateName?: string | null;
+  candidateNumber?: string | null;
 }
 
 type PdfCommand = string;
@@ -215,7 +216,7 @@ function diagnosticEvidence(problem: IELTSProblemDiagnostic): string[] {
 }
 
 export const FeedbackPdfService = {
-  createFeedbackPdf({ evaluation, session, candidateName }: FeedbackPdfInput): Blob {
+  createFeedbackPdf({ evaluation, session, candidateName, candidateNumber }: FeedbackPdfInput): Blob {
     const commands: PdfCommand[] = [];
 
     const navy: RGB = [0.12, 0.14, 0.36];
@@ -252,7 +253,12 @@ export const FeedbackPdfService = {
 
     // Identity + practice estimate
     const reportDate = new Date(evaluation.createdAt || session.createdAt || Date.now());
-    const identity = `${candidateName || 'IELTS Candidate'}  |  ${testLabel(session)}  |  ${reportDate.toLocaleDateString('en-GB')}`;
+    const identity = [
+      candidateName || 'IELTS Candidate',
+      candidateNumber ? `Candidate No: ${candidateNumber}` : null,
+      testLabel(session),
+      reportDate.toLocaleDateString('en-GB'),
+    ].filter(Boolean).join('  |  ');
     commands.push(textCommand('Speaking Performance Diagnosis', MARGIN_X, 766, 17, true, navy));
     commands.push(textCommand(truncate(identity, 92), MARGIN_X, 746, 8.2, true));
     commands.push(lineCommand(MARGIN_X, 732, PAGE_WIDTH - MARGIN_X, 732));
@@ -381,7 +387,9 @@ export const FeedbackPdfService = {
     const link = document.createElement('a');
     const date = new Date(input.evaluation.createdAt || input.session.createdAt || Date.now()).toISOString().slice(0, 10);
     link.href = url;
-    link.download = `Hexas_Education_IELTS_Evidence_Feedback_${safeFilePart(input.candidateName || 'Candidate')}_${date}.pdf`;
+    const candidateFilePart = safeFilePart(input.candidateName || 'Candidate');
+    const numberFilePart = input.candidateNumber ? `_${safeFilePart(input.candidateNumber)}` : '';
+    link.download = `Hexas_Education_IELTS_Evidence_Feedback_${candidateFilePart}${numberFilePart}_${date}.pdf`;
     document.body.appendChild(link);
     link.click();
     link.remove();
