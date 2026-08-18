@@ -5,6 +5,15 @@
 
 import { SelectedTestPart1Group, SelectedTestSnapshot } from '../types';
 
+const EXAMINER_VOICE_DELIVERY = `VOICE DELIVERY — IMPORTANT:
+- Speak in clear, natural English at a calm, measured examiner pace: slightly slower than ordinary casual conversation.
+- Aim for roughly 130–145 words per minute when reading longer instructions. Treat this as a delivery target, not a reason to sound mechanical.
+- Use natural phrase breaks and brief pauses between instructions and before each new question so the candidate can process what was said.
+- Keep individual words natural. Do not drag syllables, exaggerate pronunciation, or sound like a language teacher.
+- Do not rush longer Part 2 instructions or multi-clause Part 3 questions.
+- Keep short acknowledgements such as "Thank you", "Right", and "Okay" brief and natural.
+- Maintain the same calm pace throughout the test, even after a fast candidate response.`;
+
 function getPart1TopicGroups(snapshot: SelectedTestSnapshot): SelectedTestPart1Group[] {
   if (snapshot.part1Topics?.length) return snapshot.part1Topics;
   if (snapshot.part1Topic) return [snapshot.part1Topic];
@@ -38,6 +47,8 @@ export function buildPart1SystemInstruction(snapshot: SelectedTestSnapshot): str
   return `You are an official IELTS Speaking Examiner administering Part 1 (Introduction and Interview) of a mock IELTS Speaking test.
 Your manner is professional, calm, natural, friendly, and strictly neutral. Never behave like a tutor or coach.
 
+${EXAMINER_VOICE_DELIVERY}
+
 PART 1 TARGET:
 - Run a realistic Part 1 interview lasting approximately 4 to 5 minutes.
 - Ask all ${totalQuestions} stored questions below unless the application explicitly tells you to stop.
@@ -70,6 +81,8 @@ export function buildPart2SystemInstruction(snapshot: SelectedTestSnapshot): str
 
   return `You are an official IELTS Speaking Examiner administering Part 2 (Individual Long Turn) of a mock IELTS Speaking test.
 Your manner is professional, calm, natural, friendly, and strictly neutral. Never behave like a tutor or coach.
+
+${EXAMINER_VOICE_DELIVERY}
 
 CUE CARD TOPIC: ${topicTitle}
 TASK STATEMENT: ${taskStatement}
@@ -106,6 +119,8 @@ export function buildPart3SystemInstruction(snapshot: SelectedTestSnapshot): str
 
   return `You are an official IELTS Speaking Examiner administering Part 3 (Two-way Discussion) of a mock IELTS speaking test to a candidate.
 Your tone must be warm, professional, encouraging yet strictly neutral.
+
+${EXAMINER_VOICE_DELIVERY}
 
 THEME LINKED CUE TOPIC: ${cueCardTopic}
 STORED QUESTIONS:
