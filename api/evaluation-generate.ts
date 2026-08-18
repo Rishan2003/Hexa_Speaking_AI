@@ -1,4 +1,5 @@
-const API_REVISION = '1.6.0-detailed-evidence-feedback';
+const API_REVISION = '1.6.1-display-band-plus-half';
+const STUDENT_BAND_ADJUSTMENT = 0.5;
 const LEGACY_PRONUNCIATION_PLACEHOLDER = 0;
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
@@ -32,6 +33,11 @@ function roundBand(value: unknown, fallback = 6): number {
   const n = typeof value === 'number' ? value : Number(value);
   const safe = Number.isFinite(n) ? n : fallback;
   return Math.max(1, Math.min(9, Math.round(safe * 2) / 2));
+}
+
+function adjustedStudentBand(value: unknown, fallback = 6): number {
+  const strictBand = roundBand(value, fallback);
+  return Math.min(9, strictBand + STUDENT_BAND_ADJUSTMENT);
 }
 
 function words(text: string): string[] {
@@ -169,9 +175,12 @@ function normalizeEvaluation(parsed: any, session: any, uid: string, model: stri
   const lexicalRaw = criteria?.lexicalResource || {};
   const grammarRaw = criteria?.grammaticalRangeAccuracy || {};
 
-  const fluencyScore = roundBand(fluencyRaw.score);
-  const lexicalScore = roundBand(lexicalRaw.score);
-  const grammarScore = roundBand(grammarRaw.score);
+  // Gemini remains a strict evaluator; only the final student-facing scores
+  // receive the configured half-band uplift. This keeps diagnostic feedback
+  // evidence-based while making scoring consistently 0.5 more generous.
+  const fluencyScore = adjustedStudentBand(fluencyRaw.score);
+  const lexicalScore = adjustedStudentBand(lexicalRaw.score);
+  const grammarScore = adjustedStudentBand(grammarRaw.score);
   // This endpoint evaluates transcript-grounded language performance only.
   // Keep the legacy pronunciation field structurally present for older clients,
   // but do not use it in the displayed practice estimate.
