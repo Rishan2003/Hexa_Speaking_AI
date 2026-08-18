@@ -106,7 +106,7 @@ function buildPdf(commands: PdfCommand[]): Blob {
   objects[5] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>`;
   objects[6] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
 
-  let pdf = '%PDF-1.4\n% Hexa Education One Page Diagnostic Feedback\n';
+  let pdf = '%PDF-1.4\n% Hexa Education One Page Evidence Feedback\n';
   const offsets: number[] = [0];
 
   for (let index = 1; index <= 6; index += 1) {
@@ -146,57 +146,72 @@ function scoreText(score: number | undefined): string {
   return typeof score === 'number' && Number.isFinite(score) && score > 0 ? score.toFixed(1) : 'N/A';
 }
 
-function firstNonEmpty(...values: Array<unknown>): string {
+function uniqueNonEmpty(values: unknown[], max = 4): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
   for (const value of values) {
     const text = asciiText(value);
-    if (text) return text;
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    result.push(text);
+    if (result.length >= max) break;
   }
-  return '';
+  return result;
 }
 
 function deriveFallbackDiagnostics(evaluation: IELTSEvaluation): IELTSProblemDiagnostic[] {
   const diagnostics: IELTSProblemDiagnostic[] = [];
-  const grammar = evaluation.criteria.grammaticalRangeAccuracy.corrections?.[0];
-  const lexical = evaluation.criteria.lexicalResource.improvedPhrases?.[0];
-  const fluencyExample = evaluation.criteria.fluencyAndCoherence.examples?.[0];
+  const grammarCorrections = evaluation.criteria.grammaticalRangeAccuracy.corrections || [];
+  const lexicalPhrases = evaluation.criteria.lexicalResource.improvedPhrases || [];
+  const fluencyExamples = evaluation.criteria.fluencyAndCoherence.examples || [];
 
-  if (grammar) {
+  if (grammarCorrections.length) {
     diagnostics.push({
       area: 'Grammar',
       label: 'Grammar accuracy pattern',
       severity: 'high',
-      evidence: grammar.incorrect,
-      explanation: grammar.ruleExplanation || evaluation.criteria.grammaticalRangeAccuracy.feedback,
-      howToImprove: `Use the corrected form: ${grammar.correct}`,
-      practiceDrill: 'Make 8 new spoken sentences with this same grammar pattern, then repeat them without reading.',
+      evidence: grammarCorrections[0].incorrect,
+      evidenceExamples: grammarCorrections.slice(0, 3).map((item) => item.incorrect),
+      explanation: grammarCorrections[0].ruleExplanation || evaluation.criteria.grammaticalRangeAccuracy.feedback,
+      howToImprove: `Use the corrected pattern consistently, e.g. "${grammarCorrections[0].correct}".`,
+      practiceDrill: 'Say 8 new sentences using the same corrected pattern, then repeat all 8 without reading.',
     });
   }
 
-  if (lexical) {
+  if (lexicalPhrases.length) {
     diagnostics.push({
       area: 'Lexical Resource',
       label: 'Lexical precision / collocation',
       severity: 'medium',
-      evidence: lexical.original,
-      explanation: lexical.explanation || evaluation.criteria.lexicalResource.feedback,
-      howToImprove: `Replace it naturally with: ${lexical.improved}`,
-      practiceDrill: 'Create 5 short IELTS answers using the improved phrase naturally in different contexts.',
+      evidence: lexicalPhrases[0].original,
+      evidenceExamples: lexicalPhrases.slice(0, 3).map((item) => item.original),
+      explanation: lexicalPhrases[0].explanation || evaluation.criteria.lexicalResource.feedback,
+      howToImprove: `Prefer the more natural form "${lexicalPhrases[0].improved}" and reuse it in context.`,
+      practiceDrill: 'Build 5 short IELTS answers using the improved phrase naturally in five different contexts.',
     });
   }
 
-  if (fluencyExample || evaluation.criteria.fluencyAndCoherence.feedback) {
+  if (fluencyExamples.length || evaluation.criteria.fluencyAndCoherence.feedback) {
     diagnostics.push({
       area: 'Fluency & Coherence',
       label: 'Answer development / coherence',
       severity: 'medium',
-      evidence: fluencyExample || 'Pattern identified across the candidate answers.',
+      evidence: fluencyExamples[0] || 'Recurring answer-development pattern identified.',
+      evidenceExamples: fluencyExamples.slice(0, 3),
       explanation: evaluation.criteria.fluencyAndCoherence.feedback,
-      howToImprove: 'Build answers with Point -> Reason -> Example instead of stopping after the first idea.',
-      practiceDrill: 'Answer 3 questions for 45-60 seconds each and include one reason plus one example every time.',
+      howToImprove: 'Use Point -> Reason -> Example -> Result for answers that need development.',
+      practiceDrill: 'Answer 3 questions for 45-60 seconds each; every answer must include one reason and one example.',
     });
   }
 
   return diagnostics.slice(0, 3);
+}
+
+function diagnosticEvidence(problem: IELTSProblemDiagnostic): string[] {
+  return uniqueNonEmpty([
+    ...(Array.isArray(problem.evidenceExamples) ? problem.evidenceExamples : []),
+    problem.evidence,
+  ], 3);
 }
 
 export const FeedbackPdfService = {
@@ -216,11 +231,11 @@ export const FeedbackPdfService = {
       x: number,
       y: number,
       width: number,
-      size = 8.2,
+      size = 8.0,
       maxLines = 2,
       color: RGB = [0.12, 0.15, 0.20],
       bold = false,
-      lineHeight = 10.2,
+      lineHeight = 9.2,
     ) => {
       const lines = wrapText(value, size, width, maxLines);
       lines.forEach((line, index) => {
@@ -229,125 +244,133 @@ export const FeedbackPdfService = {
       return lines.length;
     };
 
-    // Header
+    // Brand header
     commands.push(rectCommand(0, 798, PAGE_WIDTH, 44, navy));
     commands.push(rectCommand(0, 792, PAGE_WIDTH, 6, red));
     commands.push(textCommand("HEXA'S EDUCATION", MARGIN_X, 817, 12, true, [1, 1, 1]));
-    commands.push(textCommand('IELTS SPEAKING - ONE PAGE DIAGNOSTIC FEEDBACK', 260, 817, 9.2, true, [1, 1, 1]));
+    commands.push(textCommand('IELTS SPEAKING - ONE PAGE EVIDENCE FEEDBACK', 258, 817, 9.0, true, [1, 1, 1]));
 
-    // Identity + overall band
+    // Identity + practice estimate
     const reportDate = new Date(evaluation.createdAt || session.createdAt || Date.now());
     const identity = `${candidateName || 'IELTS Candidate'}  |  ${testLabel(session)}  |  ${reportDate.toLocaleDateString('en-GB')}`;
-    commands.push(textCommand('Performance Diagnosis', MARGIN_X, 765, 18, true, navy));
-    commands.push(textCommand(truncate(identity, 90), MARGIN_X, 746, 8.3, true));
-    commands.push(textCommand('Overall estimated band', 424, 765, 7.5, true, muted));
-    commands.push(textCommand(evaluation.estimatedOverallBand.toFixed(1), 507, 742, 24, true, navy));
-    commands.push(lineCommand(MARGIN_X, 729, PAGE_WIDTH - MARGIN_X, 729));
+    commands.push(textCommand('Speaking Performance Diagnosis', MARGIN_X, 766, 17, true, navy));
+    commands.push(textCommand(truncate(identity, 92), MARGIN_X, 746, 8.2, true));
+    commands.push(lineCommand(MARGIN_X, 732, PAGE_WIDTH - MARGIN_X, 732));
 
-    // 4 criterion score strip
-    const criterionScores = [
-      ['Fluency', scoreText(evaluation.criteria.fluencyAndCoherence.score)],
-      ['Lexical', scoreText(evaluation.criteria.lexicalResource.score)],
+    // Overall + three assessed language scores
+    const scoreItems = [
+      ['Practice estimate', evaluation.estimatedOverallBand.toFixed(1)],
+      ['Fluency & Coherence', scoreText(evaluation.criteria.fluencyAndCoherence.score)],
+      ['Lexical Resource', scoreText(evaluation.criteria.lexicalResource.score)],
       ['Grammar', scoreText(evaluation.criteria.grammaticalRangeAccuracy.score)],
-      ['Pronunciation*', scoreText(evaluation.criteria.pronunciation.score)],
     ] as const;
     const scoreGap = 7;
     const scoreWidth = (CONTENT_WIDTH - scoreGap * 3) / 4;
-    criterionScores.forEach(([label, score], index) => {
+    scoreItems.forEach(([label, score], index) => {
       const x = MARGIN_X + index * (scoreWidth + scoreGap);
-      commands.push(rectCommand(x, 674, scoreWidth, 42, soft));
-      commands.push(textCommand(label, x + 9, 701, 7.3, true, muted));
-      commands.push(textCommand(score, x + 9, 682, 15, true, navy));
+      commands.push(rectCommand(x, 687, scoreWidth, 34, index === 0 ? blueSoft : soft));
+      commands.push(textCommand(label, x + 8, 708, 6.7, true, muted));
+      commands.push(textCommand(score, x + 8, 692, 13.5, true, navy));
     });
 
-    commands.push(textCommand('4 CRITERIA FEEDBACK + EXAMPLE', MARGIN_X, 654, 9, true, navy));
+    commands.push(textCommand('DETAILED CRITERION FEEDBACK + MULTIPLE EVIDENCE EXAMPLES', MARGIN_X, 670, 8.7, true, navy));
 
-    const grammarExample = evaluation.criteria.grammaticalRangeAccuracy.corrections?.[0];
-    const lexicalExample = evaluation.criteria.lexicalResource.improvedPhrases?.[0];
-    const fluencyExample = evaluation.criteria.fluencyAndCoherence.examples?.[0];
+    const fluencyExamples = uniqueNonEmpty(evaluation.criteria.fluencyAndCoherence.examples || [], 3);
+    const lexicalExamples = (evaluation.criteria.lexicalResource.improvedPhrases || []).slice(0, 3).map((item) =>
+      `"${item.original}" -> "${item.improved}"`
+    );
+    const grammarExamples = (evaluation.criteria.grammaticalRangeAccuracy.corrections || []).slice(0, 3).map((item) =>
+      `"${item.incorrect}" -> "${item.correct}"`
+    );
 
     const criterionRows = [
       {
         label: 'Fluency & Coherence',
         score: scoreText(evaluation.criteria.fluencyAndCoherence.score),
         feedback: evaluation.criteria.fluencyAndCoherence.feedback,
-        example: fluencyExample ? `Example: "${fluencyExample}"` : 'Example: No short evidence example was returned.',
+        examples: fluencyExamples,
       },
       {
         label: 'Lexical Resource',
         score: scoreText(evaluation.criteria.lexicalResource.score),
         feedback: evaluation.criteria.lexicalResource.feedback,
-        example: lexicalExample
-          ? `Example: "${lexicalExample.original}" -> "${lexicalExample.improved}"`
-          : 'Example: No defensible lexical replacement was identified.',
+        examples: lexicalExamples,
       },
       {
-        label: 'Grammar Range & Accuracy',
+        label: 'Grammatical Range & Accuracy',
         score: scoreText(evaluation.criteria.grammaticalRangeAccuracy.score),
         feedback: evaluation.criteria.grammaticalRangeAccuracy.feedback,
-        example: grammarExample
-          ? `Example: "${grammarExample.incorrect}" -> "${grammarExample.correct}"`
-          : 'Example: No defensible grammar correction was identified.',
-      },
-      {
-        label: 'Pronunciation',
-        score: scoreText(evaluation.criteria.pronunciation.score),
-        feedback: evaluation.criteria.pronunciation.feedback,
-        example: evaluation.criteria.pronunciation.status === 'assumed'
-          ? 'Example: Audio analysis is off, so no pronunciation example is claimed.'
-          : firstNonEmpty(evaluation.criteria.pronunciation.problemWords?.[0], 'No pronunciation problem word was identified.'),
+        examples: grammarExamples,
       },
     ];
 
-    const rowHeight = 56;
-    const rowStartY = 590;
+    const criterionBottoms = [570, 470, 370];
     criterionRows.forEach((row, index) => {
-      const y = rowStartY - index * rowHeight;
-      const fill = index % 2 === 0 ? blueSoft : soft;
-      commands.push(rectCommand(MARGIN_X, y, CONTENT_WIDTH, rowHeight - 5, fill));
-      commands.push(textCommand(row.label, MARGIN_X + 10, y + 34, 8.2, true, navy));
-      commands.push(textCommand(`Band ${row.score}`, MARGIN_X + 10, y + 18, 8.0, true, red));
-      addWrapped(row.feedback, MARGIN_X + 128, y + 35, CONTENT_WIDTH - 140, 7.8, 2, undefined, false, 9.2);
-      addWrapped(row.example, MARGIN_X + 128, y + 12, CONTENT_WIDTH - 140, 7.2, 1, muted, false, 8.5);
+      const y = criterionBottoms[index];
+      const fill = index === 0 ? blueSoft : index === 1 ? greenSoft : soft;
+      commands.push(rectCommand(MARGIN_X, y, CONTENT_WIDTH, 94, fill));
+      commands.push(textCommand(row.label, MARGIN_X + 10, y + 75, 8.6, true, navy));
+      commands.push(textCommand(`Band ${row.score}`, PAGE_WIDTH - MARGIN_X - 64, y + 75, 8.0, true, red));
+
+      addWrapped(row.feedback, MARGIN_X + 10, y + 58, CONTENT_WIDTH - 20, 7.35, 4, undefined, false, 8.4);
+
+      const evidence = row.examples.length ? row.examples : ['No short defensible example was returned for this criterion.'];
+      commands.push(textCommand('Evidence:', MARGIN_X + 10, y + 18, 6.8, true, muted));
+      addWrapped(`E1: ${truncate(evidence[0], 120)}`, MARGIN_X + 57, y + 18, CONTENT_WIDTH - 69, 6.65, 1, undefined, false, 7.6);
+      if (evidence[1]) {
+        addWrapped(`E2: ${truncate(evidence[1], 120)}`, MARGIN_X + 57, y + 7, CONTENT_WIDTH - 69, 6.65, 1, muted, false, 7.6);
+      }
     });
 
-    // Specific problem detection and practical repair
-    commands.push(textCommand('SPECIFIC PROBLEMS DETECTED -> HOW TO FIX THEM', MARGIN_X, 355, 9, true, navy));
-    commands.push(textCommand('Only the highest-impact patterns are shown; examples stay short and evidence-based.', MARGIN_X, 340, 7.4, false, muted));
+    // Recurring problems + repair plan
+    commands.push(textCommand('TOP RECURRING PROBLEMS -> EVIDENCE -> FIX -> PRACTICAL DRILL', MARGIN_X, 349, 8.7, true, navy));
+    commands.push(textCommand('Only transcript-supported recurring patterns are included.', MARGIN_X, 336, 6.8, false, muted));
 
-    const structured = (evaluation.problemDiagnostics || []).filter((item) => item?.label && item?.howToImprove && item?.practiceDrill);
+    const visibleDiagnosticAreas = new Set(['Fluency & Coherence', 'Lexical Resource', 'Grammar', 'General']);
+    const structured = (evaluation.problemDiagnostics || []).filter((item) =>
+      item?.label && item?.howToImprove && item?.practiceDrill && visibleDiagnosticAreas.has(String(item?.area))
+    );
     const diagnostics = (structured.length ? structured : deriveFallbackDiagnostics(evaluation)).slice(0, 3);
+    const problemBottoms = [245, 155, 65];
     const diagnosticFills = [amberSoft, greenSoft, soft];
-    const problemHeight = 78;
-    const problemStartY = 248;
 
     diagnostics.forEach((problem, index) => {
-      const y = problemStartY - index * problemHeight;
-      commands.push(rectCommand(MARGIN_X, y, CONTENT_WIDTH, problemHeight - 7, diagnosticFills[index] || soft));
-      commands.push(textCommand(`${index + 1}. ${truncate(problem.label, 36)}`, MARGIN_X + 10, y + 54, 8.5, true, navy));
+      const y = problemBottoms[index];
+      commands.push(rectCommand(MARGIN_X, y, CONTENT_WIDTH, 84, diagnosticFills[index] || soft));
+      commands.push(textCommand(`${index + 1}. ${truncate(problem.label, 43)}`, MARGIN_X + 10, y + 66, 8.2, true, navy));
       const severity = String(problem.severity || 'medium').toUpperCase();
-      commands.push(textCommand(`${problem.area} | ${severity}`, MARGIN_X + 350, y + 54, 7.0, true, red));
+      commands.push(textCommand(`${problem.area} | ${severity}`, PAGE_WIDTH - MARGIN_X - 145, y + 66, 6.7, true, red));
 
-      commands.push(textCommand('Evidence:', MARGIN_X + 10, y + 38, 7.2, true, muted));
-      addWrapped(problem.evidence, MARGIN_X + 58, y + 38, CONTENT_WIDTH - 70, 7.4, 1, undefined, false, 8.5);
+      const examples = diagnosticEvidence(problem);
+      const evidenceText = examples.length
+        ? examples.slice(0, 2).map((item, i) => `E${i + 1}: "${truncate(item, 82)}"`).join('   ')
+        : `E1: "${truncate(problem.evidence, 82)}"`;
+      commands.push(textCommand('Evidence:', MARGIN_X + 10, y + 50, 6.8, true, muted));
+      addWrapped(evidenceText, MARGIN_X + 57, y + 50, CONTENT_WIDTH - 69, 6.55, 2, undefined, false, 7.4);
 
-      commands.push(textCommand('Fix:', MARGIN_X + 10, y + 23, 7.2, true, muted));
-      addWrapped(problem.howToImprove, MARGIN_X + 58, y + 23, CONTENT_WIDTH - 70, 7.4, 1, undefined, false, 8.5);
+      commands.push(textCommand('Fix:', MARGIN_X + 10, y + 28, 6.8, true, muted));
+      addWrapped(problem.howToImprove, MARGIN_X + 57, y + 28, CONTENT_WIDTH - 69, 6.55, 2, undefined, false, 7.2);
 
-      commands.push(textCommand('Drill:', MARGIN_X + 10, y + 8, 7.2, true, muted));
-      addWrapped(problem.practiceDrill, MARGIN_X + 58, y + 8, CONTENT_WIDTH - 70, 7.4, 1, undefined, false, 8.5);
+      commands.push(textCommand('Drill:', MARGIN_X + 10, y + 12, 6.8, true, muted));
+      addWrapped(problem.practiceDrill, MARGIN_X + 57, y + 12, CONTENT_WIDTH - 69, 6.55, 2, undefined, false, 7.2);
     });
 
     if (!diagnostics.length) {
-      commands.push(rectCommand(MARGIN_X, 170, CONTENT_WIDTH, 70, soft));
-      addWrapped('No reliable recurring problem pattern was returned. Re-evaluate the completed test to generate structured diagnostic targets.', MARGIN_X + 12, 212, CONTENT_WIDTH - 24, 8.0, 3);
+      commands.push(rectCommand(MARGIN_X, 105, CONTENT_WIDTH, 95, soft));
+      addWrapped(
+        'No reliable recurring pattern was returned. Re-evaluate the completed test to generate detailed evidence-based targets.',
+        MARGIN_X + 12,
+        165,
+        CONTENT_WIDTH - 24,
+        8.0,
+        3,
+      );
     }
 
     // Footer
-    commands.push(lineCommand(MARGIN_X, 55, PAGE_WIDTH - MARGIN_X, 55));
-    commands.push(textCommand('* Pronunciation is currently assumed at Band 6.0; it is not audio-assessed.', MARGIN_X, 39, 6.9, false, muted));
-    commands.push(textCommand('Practice estimate only - not an official IELTS result.', MARGIN_X, 27, 6.9, false, muted));
-    commands.push(textCommand("Hexa's Education", 474, 27, 7.0, true, navy));
+    commands.push(lineCommand(MARGIN_X, 47, PAGE_WIDTH - MARGIN_X, 47));
+    commands.push(textCommand('Transcript-based practice feedback - not an official IELTS result.', MARGIN_X, 30, 6.8, false, muted));
+    commands.push(textCommand("Hexa's Education", 475, 30, 6.9, true, navy));
 
     return buildPdf(commands);
   },
@@ -358,7 +381,7 @@ export const FeedbackPdfService = {
     const link = document.createElement('a');
     const date = new Date(input.evaluation.createdAt || input.session.createdAt || Date.now()).toISOString().slice(0, 10);
     link.href = url;
-    link.download = `Hexas_Education_IELTS_Diagnostic_Feedback_${safeFilePart(input.candidateName || 'Candidate')}_${date}.pdf`;
+    link.download = `Hexas_Education_IELTS_Evidence_Feedback_${safeFilePart(input.candidateName || 'Candidate')}_${date}.pdf`;
     document.body.appendChild(link);
     link.click();
     link.remove();

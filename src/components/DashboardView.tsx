@@ -123,7 +123,6 @@ export const DashboardView: React.FC = () => {
   const avgFluency = average((evaluation) => evaluation.criteria.fluencyAndCoherence.score);
   const avgLexical = average((evaluation) => evaluation.criteria.lexicalResource.score);
   const avgGrammar = average((evaluation) => evaluation.criteria.grammaticalRangeAccuracy.score);
-  const avgPronunciation = average((evaluation) => evaluation.criteria.pronunciation.score);
 
   const recentCompletedSession = [...completedSessions].sort((a, b) => b.createdAt - a.createdAt)[0];
   const recentEvaluation = recentCompletedSession
@@ -134,7 +133,6 @@ export const DashboardView: React.FC = () => {
     { name: 'Fluency', score: avgFluency },
     { name: 'Vocabulary', score: avgLexical },
     { name: 'Grammar', score: avgGrammar },
-    { name: 'Pronunciation', score: avgPronunciation },
   ];
 
   const scoredSkills = skills.filter((skill) => skill.score > 0);
@@ -286,7 +284,7 @@ export const DashboardView: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-3 sm:flex-col sm:items-end">
                       <div className="rounded-2xl bg-[var(--hexa-navy)] px-4 py-3 text-center text-white">
-                        <span className="block text-[9px] font-bold uppercase tracking-widest text-white/55">Band</span>
+                        <span className="block text-[9px] font-bold uppercase tracking-widest text-white/55">Estimate</span>
                         <strong className="font-mono text-2xl font-black">{recentEvaluation.estimatedOverallBand.toFixed(1)}</strong>
                       </div>
                       <button
@@ -303,7 +301,7 @@ export const DashboardView: React.FC = () => {
                   <FileText size={30} className="mx-auto text-slate-300" />
                   <h3 className="mt-3 text-sm font-black text-slate-900">No assessment report yet</h3>
                   <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-slate-500">
-                    Complete your first speaking session and your latest band estimate, strengths and improvement priorities will appear here.
+                    Complete your first speaking session and your latest speaking estimate, strengths and improvement priorities will appear here.
                   </p>
                 </div>
               )}
@@ -325,7 +323,7 @@ export const DashboardView: React.FC = () => {
                   <strong className="mt-1 block text-2xl font-black text-slate-950">{completedSessions.length}</strong>
                 </div>
                 <div className="rounded-2xl bg-[var(--hexa-soft)] p-4">
-                  <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Average band</span>
+                  <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Average estimate</span>
                   <strong className="mt-1 block text-2xl font-black text-[var(--hexa-navy)]">{avgBand ? avgBand.toFixed(1) : '—'}</strong>
                 </div>
               </div>
@@ -356,8 +354,8 @@ export const DashboardView: React.FC = () => {
               </div>
               <p className="mt-3 text-xs leading-relaxed text-slate-600">
                 {weakestSkill
-                  ? `Your current lowest average is ${weakestSkill.name} at band ${weakestSkill.score.toFixed(1)}. Focus your next sessions on clearer development, controlled pacing and accurate language.`
-                  : 'Complete a full mock first. It gives HEXA\'S Speaking AI enough evidence to create a useful baseline across the speaking criteria.'}
+                  ? `Your current lowest average is ${weakestSkill.name} at ${weakestSkill.score.toFixed(1)}. Focus your next sessions on clearer development, controlled pacing and accurate language.`
+                  : 'Complete a full mock first. It gives HEXA\'S Speaking AI enough evidence to create a useful baseline across fluency/coherence, vocabulary and grammar.'}
               </p>
             </section>
 

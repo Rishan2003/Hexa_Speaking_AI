@@ -306,10 +306,13 @@ export interface IELTSEvaluationCriteria {
 
 
 export interface IELTSProblemDiagnostic {
-  area: 'Fluency & Coherence' | 'Lexical Resource' | 'Grammar' | 'Pronunciation' | 'General';
+  area: 'Fluency & Coherence' | 'Lexical Resource' | 'Grammar' | 'General';
   label: string;
   severity?: 'high' | 'medium' | 'low';
+  /** Primary representative quote kept for backwards compatibility. */
   evidence: string;
+  /** Additional transcript-grounded examples showing the same recurring pattern. */
+  evidenceExamples?: string[];
   explanation: string;
   howToImprove: string;
   practiceDrill: string;

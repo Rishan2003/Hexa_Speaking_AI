@@ -1321,7 +1321,7 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
                 <div className="bg-emerald-50 border border-emerald-100 max-w-[80%] rounded-2xl rounded-tl-none p-4 text-xs leading-normal flex items-start gap-3">
                   <RefreshCw size={14} className="text-emerald-600 animate-spin mt-0.5 shrink-0" />
                   <div className="text-emerald-800">
-                    <strong>HEXA'S Assessment Engine:</strong> Synthesizing fluency, grammatical accuracy, lexical choice, and pronunciation. Moving to your results shortly...
+                    <strong>HEXA'S Assessment Engine:</strong> Synthesizing fluency/coherence, grammatical accuracy, lexical choice, and evidence-backed improvement priorities. Moving to your results shortly...
                   </div>
                 </div>
               </div>
