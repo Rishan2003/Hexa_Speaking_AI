@@ -304,6 +304,17 @@ export interface IELTSEvaluationCriteria {
   pronunciation: PronunciationDetails;
 }
 
+
+export interface IELTSProblemDiagnostic {
+  area: 'Fluency & Coherence' | 'Lexical Resource' | 'Grammar' | 'Pronunciation' | 'General';
+  label: string;
+  severity?: 'high' | 'medium' | 'low';
+  evidence: string;
+  explanation: string;
+  howToImprove: string;
+  practiceDrill: string;
+}
+
 export interface IELTSPartFeedback {
   part: 'Part 1' | 'Part 2' | 'Part 3';
   summary: string;
@@ -349,6 +360,8 @@ export interface IELTSEvaluation {
   strengths?: string[];
   priorities?: string[];
   partFeedback?: IELTSPartFeedback[];
+  problemDiagnostics?: IELTSProblemDiagnostic[];
+  voiceFeedbackBangla?: string;
   actionPlan: string[];
   status?: EvaluationStatus;
   error?: string;
