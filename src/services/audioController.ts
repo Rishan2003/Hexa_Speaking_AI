@@ -217,18 +217,29 @@ export class BrowserAudioControllerService implements BrowserAudioController {
     let stream: MediaStream | null = null;
 
     try {
+      const audioConstraints: MediaTrackConstraints = {
+        sampleRate: 16000,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      };
+
+      if (targetDeviceId && targetDeviceId !== 'default') {
+        audioConstraints.deviceId = { exact: targetDeviceId };
+      }
+
       const constraints: MediaStreamConstraints = {
-        audio: targetDeviceId && targetDeviceId !== 'default'
-          ? { deviceId: { exact: targetDeviceId } }
-          : true
+        audio: audioConstraints
       };
 
       stream = await navigator.mediaDevices.getUserMedia(constraints);
     } catch (err: any) {
-      // Fallback: If exact deviceId constraint failed, try standard audio constraint
+      // Fallback: If exact deviceId constraint failed, try standard 16kHz audio constraint
       if (targetDeviceId && targetDeviceId !== 'default') {
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { sampleRate: 16000, echoCancellation: true, noiseSuppression: true } 
+          });
         } catch (fallbackErr: any) {
           err = fallbackErr;
         }
@@ -340,7 +351,7 @@ export class BrowserAudioControllerService implements BrowserAudioController {
     if (!this.audioContext || !this.sourceNode) return;
 
     try {
-      this.scriptProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
+      this.scriptProcessor = this.audioContext.createScriptProcessor(512, 1, 1);
       this.scriptProcessor.onaudioprocess = (e) => {
         if (this.deviceState.isMuted || !this.options.onAudioChunk || !this.audioContext) return;
 
