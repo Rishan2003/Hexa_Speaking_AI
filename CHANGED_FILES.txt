@@ -22,3 +22,12 @@ api/session-mint-openai.ts
 src/tests/openaiRealtimeMultipart.test.ts
 CHANGELOG.md
 OPENAI_REALTIME_MIGRATION.md
+
+OpenAI Realtime v1.4.2 SDP EOF hotfix
+Replace/add these files:
+api/session-mint-openai.ts
+src/realtime/openaiRealtimeAdapter.ts
+src/tests/openaiRealtimeMultipart.test.ts
+CHANGELOG.md
+OPENAI_REALTIME_MIGRATION.md
+

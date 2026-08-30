@@ -24,9 +24,11 @@ VITE_USE_MOCKS=false
 
 Do not expose `OPENAI_API_KEY` or `GEMINI_API_KEY` through a `VITE_` variable.
 
-## Multipart call-creation note (v1.4.1)
+## Realtime call creation note (v1.4.2)
 
-`POST /v1/realtime/calls` requires `sdp` and `session` to be multipart fields with per-part content types. They must not be encoded as uploaded files with `filename=` metadata. The server builds the multipart body explicitly so Vercel/Node sends `Content-Disposition: form-data; name="sdp"` with `Content-Type: application/sdp`, and the same field-style encoding for the JSON `session` part.
+`POST /v1/realtime/calls` is built with the Node 22 native `FormData` implementation, exactly following OpenAI's unified WebRTC pattern: `sdp` and `session` are plain string fields and `fetch` generates the multipart boundary and headers. Do not manually set multipart `Content-Type`, `Content-Length`, per-part MIME types, or `filename=` metadata.
+
+The SDP offer is also forwarded without trimming or normalization. WebRTC SDP is line-oriented and the browser-generated terminating `\r\n` must be preserved. The client forwards `offer.sdp` directly after `setLocalDescription(offer)`.
 
 ## Connection flow
 

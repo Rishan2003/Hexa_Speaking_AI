@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-const API_REVISION = '1.4.1-openai-realtime-multipart';
+const API_REVISION = '1.4.2-openai-realtime-formdata';
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
 function makeRequestId() {
@@ -34,38 +34,17 @@ function requestBody(req: any): any {
   try { return JSON.parse(String(req.body)); } catch { return {}; }
 }
 
-export function buildOpenAIRealtimeMultipart(sdp: string, sessionConfig: Record<string, unknown>, requestId: string) {
-  // OpenAI's /v1/realtime/calls endpoint expects multipart *fields*, not
-  // uploaded files. In particular, Content-Disposition must NOT include a
-  // filename for either `sdp` or `session`. Using FormData + Blob with a
-  // filename causes OpenAI to report that the required `sdp` field is absent.
-  const boundarySeed = createHash('sha256')
-    .update(`${requestId}:${sdp.length}:${JSON.stringify(sessionConfig).length}`)
-    .digest('hex')
-    .slice(0, 32);
-  const boundary = `----hexa-openai-${boundarySeed}`;
-  const sessionJson = JSON.stringify(sessionConfig);
-  const body = Buffer.from([
-    `--${boundary}\r\n`,
-    'Content-Disposition: form-data; name="sdp"\r\n',
-    'Content-Type: application/sdp\r\n',
-    '\r\n',
-    sdp,
-    '\r\n',
-    `--${boundary}\r\n`,
-    'Content-Disposition: form-data; name="session"\r\n',
-    'Content-Type: application/json\r\n',
-    '\r\n',
-    sessionJson,
-    '\r\n',
-    `--${boundary}--\r\n`,
-  ].join(''), 'utf8');
-
-  return {
-    body,
-    contentType: `multipart/form-data; boundary=${boundary}`,
-  };
+export function buildOpenAIRealtimeFormData(sdp: string, sessionConfig: Record<string, unknown>) {
+  // Match OpenAI's unified WebRTC example exactly: both values are plain
+  // multipart string fields. Do not add per-part Content-Type headers, a
+  // filename, a manual boundary, or Content-Length. Native FormData/fetch
+  // handles multipart serialization correctly on the Node 22 Vercel runtime.
+  const form = new FormData();
+  form.set('sdp', sdp);
+  form.set('session', JSON.stringify(sessionConfig));
+  return form;
 }
+
 
 
 interface ServiceAccountShape {
@@ -355,7 +334,9 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    const sdp = String(body.sdp || '').trim();
+    // SDP is a line-oriented wire format. Preserve the browser's offer byte-for-byte
+    // as a JS string: in particular, do NOT trim the terminating CRLF.
+    const sdp = typeof body.sdp === 'string' ? body.sdp : '';
     if (!sdp || !sdp.startsWith('v=') || sdp.length > 250_000) {
       return send(res, 400, {
         error: 'A valid WebRTC SDP offer is required to create the OpenAI Realtime call.',
@@ -419,7 +400,7 @@ export default async function handler(req: any, res: any) {
       },
     };
 
-    const multipart = buildOpenAIRealtimeMultipart(sdp, sessionConfig, requestId);
+    const realtimeForm = buildOpenAIRealtimeFormData(sdp, sessionConfig);
 
     const userId = String(authResult.payload.users[0].localId);
     const safetyIdentifier = createHash('sha256')
@@ -435,12 +416,10 @@ export default async function handler(req: any, res: any) {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${openaiApiKey}`,
-          'Content-Type': multipart.contentType,
-          'Content-Length': String(multipart.body.byteLength),
           'OpenAI-Safety-Identifier': safetyIdentifier,
           'X-Client-Request-Id': requestId,
         },
-        body: multipart.body,
+        body: realtimeForm,
         signal: openaiController.signal,
       });
     } catch (error: any) {
@@ -468,6 +447,10 @@ export default async function handler(req: any, res: any) {
         stage: 'openai_realtime_call',
         upstreamStatus: openaiResponse.status,
         openaiRequestId: openaiResponse.headers.get('x-request-id') || undefined,
+        sdpLength: sdp.length,
+        sdpHasAudio: /(?:^|\r?\n)m=audio\s/m.test(sdp),
+        sdpHasDataChannel: /(?:^|\r?\n)m=application\s/m.test(sdp),
+        sdpEndsWithCrlf: sdp.endsWith('\r\n'),
         requestId,
         apiRevision: API_REVISION,
       });

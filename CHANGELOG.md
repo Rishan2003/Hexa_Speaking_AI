@@ -1,3 +1,10 @@
+## v1.4.2-openai-realtime-formdata — OpenAI SDP EOF fix
+- Replaced the hand-built `/v1/realtime/calls` multipart body with native Node 22 `FormData`, matching OpenAI's current unified WebRTC example.
+- Preserves the browser-generated SDP offer exactly; the server no longer calls `.trim()` and therefore keeps the terminating CRLF required by strict SDP parsers.
+- Uses `offer.sdp` directly after `setLocalDescription(offer)`, matching OpenAI's browser example.
+- Adds safe SDP diagnostics (length/audio/data-channel/CRLF presence) to upstream error reports without exposing SDP contents.
+- Endpoint revision is now `1.4.2-openai-realtime-formdata`.
+
 ## v1.4.1-openai-realtime-multipart — OpenAI WebRTC call creation fix
 - Fixed `/api/session/mint-openai` multipart serialization for `POST /v1/realtime/calls`.
 - Encodes `sdp` and `session` as typed multipart fields without `filename=` metadata, matching OpenAI's call API.

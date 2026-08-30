@@ -139,8 +139,14 @@ export class OpenAIRealtimeAdapter implements RealtimeVoiceProvider {
       const channelReady = this.waitForDataChannelOpen(dc);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      const offerSdp = pc.localDescription?.sdp || offer.sdp;
-      if (!offerSdp) throw new Error('The browser could not create a WebRTC SDP offer.');
+      // Use the SDP string from createOffer(), matching OpenAI's current
+      // unified WebRTC example. setLocalDescription() is still required to
+      // initialize the peer connection, but its asynchronously-mutated SDP is
+      // not what we forward to the server.
+      const offerSdp = offer.sdp;
+      if (!offerSdp || !offerSdp.trim().startsWith('v=')) {
+        throw new Error('The browser could not create a valid WebRTC SDP offer.');
+      }
 
       const idToken = await getFirebaseIdToken();
       const response = await fetch(OPENAI_REALTIME_CONFIG.mintEndpoint, {
@@ -167,6 +173,11 @@ export class OpenAIRealtimeAdapter implements RealtimeVoiceProvider {
           body?.code ? `Code: ${body.code}` : '',
           body?.stage ? `Stage: ${body.stage}` : '',
           body?.upstreamStatus ? `OpenAI HTTP: ${body.upstreamStatus}` : '',
+          body?.openaiRequestId ? `OpenAI Request ID: ${body.openaiRequestId}` : '',
+          Number.isFinite(body?.sdpLength) ? `SDP length: ${body.sdpLength}` : '',
+          typeof body?.sdpHasAudio === 'boolean' ? `SDP audio: ${body.sdpHasAudio ? 'yes' : 'no'}` : '',
+          typeof body?.sdpHasDataChannel === 'boolean' ? `SDP data: ${body.sdpHasDataChannel ? 'yes' : 'no'}` : '',
+          typeof body?.sdpEndsWithCrlf === 'boolean' ? `SDP CRLF: ${body.sdpEndsWithCrlf ? 'yes' : 'no'}` : '',
           body?.requestId ? `Request ID: ${body.requestId}` : '',
           body?.apiRevision ? `API: ${body.apiRevision}` : '',
         ].filter(Boolean).join(' · ');
