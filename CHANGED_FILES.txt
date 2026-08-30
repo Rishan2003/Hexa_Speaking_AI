@@ -14,3 +14,11 @@ src/components/DashboardView.tsx
 src/components/PracticeSetupView.tsx
 
 No package.json change is required for this feature.
+
+
+OpenAI Realtime v1.4.1 multipart hotfix
+Replace/add these files:
+api/session-mint-openai.ts
+src/tests/openaiRealtimeMultipart.test.ts
+CHANGELOG.md
+OPENAI_REALTIME_MIGRATION.md

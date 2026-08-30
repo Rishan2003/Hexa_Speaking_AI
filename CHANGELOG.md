@@ -1,3 +1,7 @@
+## v1.4.1-openai-realtime-multipart — OpenAI WebRTC call creation fix
+- Fixed `/api/session/mint-openai` multipart serialization for `POST /v1/realtime/calls`.
+- Encodes `sdp` and `session` as typed multipart fields without `filename=` metadata, matching OpenAI's call API.
+- Added a regression test for the exact multipart wire shape and bumped the endpoint revision to `1.4.1-openai-realtime-multipart`.
 
 ## v1.1.7-vercel-bootstrap-fix — Vercel function 500 recovery
 - Added a lightweight Vercel `/api/health` endpoint that does not initialize Firebase or Gemini dependencies.

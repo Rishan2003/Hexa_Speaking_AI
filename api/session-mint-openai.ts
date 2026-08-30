@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-const API_REVISION = '1.4.0-openai-realtime-webrtc';
+const API_REVISION = '1.4.1-openai-realtime-multipart';
 const runtimeEnv: Record<string, string | undefined> = (globalThis as any)?.process?.env || {};
 
 function makeRequestId() {
@@ -32,6 +32,39 @@ function requestBody(req: any): any {
   if (!req?.body) return {};
   if (typeof req.body === 'object') return req.body;
   try { return JSON.parse(String(req.body)); } catch { return {}; }
+}
+
+export function buildOpenAIRealtimeMultipart(sdp: string, sessionConfig: Record<string, unknown>, requestId: string) {
+  // OpenAI's /v1/realtime/calls endpoint expects multipart *fields*, not
+  // uploaded files. In particular, Content-Disposition must NOT include a
+  // filename for either `sdp` or `session`. Using FormData + Blob with a
+  // filename causes OpenAI to report that the required `sdp` field is absent.
+  const boundarySeed = createHash('sha256')
+    .update(`${requestId}:${sdp.length}:${JSON.stringify(sessionConfig).length}`)
+    .digest('hex')
+    .slice(0, 32);
+  const boundary = `----hexa-openai-${boundarySeed}`;
+  const sessionJson = JSON.stringify(sessionConfig);
+  const body = Buffer.from([
+    `--${boundary}\r\n`,
+    'Content-Disposition: form-data; name="sdp"\r\n',
+    'Content-Type: application/sdp\r\n',
+    '\r\n',
+    sdp,
+    '\r\n',
+    `--${boundary}\r\n`,
+    'Content-Disposition: form-data; name="session"\r\n',
+    'Content-Type: application/json\r\n',
+    '\r\n',
+    sessionJson,
+    '\r\n',
+    `--${boundary}--\r\n`,
+  ].join(''), 'utf8');
+
+  return {
+    body,
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  };
 }
 
 
@@ -386,10 +419,7 @@ export default async function handler(req: any, res: any) {
       },
     };
 
-    const form = new FormData();
-    // Match the Realtime call API's documented multipart content types.
-    form.set('sdp', new Blob([sdp], { type: 'application/sdp' }), 'offer.sdp');
-    form.set('session', new Blob([JSON.stringify(sessionConfig)], { type: 'application/json' }), 'session.json');
+    const multipart = buildOpenAIRealtimeMultipart(sdp, sessionConfig, requestId);
 
     const userId = String(authResult.payload.users[0].localId);
     const safetyIdentifier = createHash('sha256')
@@ -405,10 +435,12 @@ export default async function handler(req: any, res: any) {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${openaiApiKey}`,
+          'Content-Type': multipart.contentType,
+          'Content-Length': String(multipart.body.byteLength),
           'OpenAI-Safety-Identifier': safetyIdentifier,
           'X-Client-Request-Id': requestId,
         },
-        body: form,
+        body: multipart.body,
         signal: openaiController.signal,
       });
     } catch (error: any) {

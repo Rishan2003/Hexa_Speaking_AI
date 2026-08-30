@@ -24,6 +24,10 @@ VITE_USE_MOCKS=false
 
 Do not expose `OPENAI_API_KEY` or `GEMINI_API_KEY` through a `VITE_` variable.
 
+## Multipart call-creation note (v1.4.1)
+
+`POST /v1/realtime/calls` requires `sdp` and `session` to be multipart fields with per-part content types. They must not be encoded as uploaded files with `filename=` metadata. The server builds the multipart body explicitly so Vercel/Node sends `Content-Disposition: form-data; name="sdp"` with `Content-Type: application/sdp`, and the same field-style encoding for the JSON `session` part.
+
 ## Connection flow
 
 1. The existing audio controller obtains the browser microphone `MediaStream`.
