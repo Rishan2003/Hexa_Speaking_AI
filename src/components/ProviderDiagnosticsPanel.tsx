@@ -103,7 +103,7 @@ export const ProviderDiagnosticsPanel: React.FC<ProviderDiagnosticsPanelProps> =
         <button
           onClick={() => setIsOpen(true)}
           className="flex items-center gap-2 px-3 py-2 bg-slate-900 text-slate-100 rounded-full shadow-lg border border-slate-700 hover:bg-slate-800 transition-all cursor-pointer"
-          title="Open Gemini Live Diagnostics Panel"
+          title="Open Realtime Voice Diagnostics Panel"
         >
           <Activity className="w-4 h-4 text-emerald-400 animate-pulse" />
           <span className="font-medium text-slate-200">Live Diagnostics</span>

@@ -46,56 +46,52 @@ describe('RealtimeVoiceProvider Contract & Feature Flag Tests', () => {
     });
   });
 
-  it('2. OpenAIRealtimeAdapter is disabled by feature flag and throws on initialize', async () => {
+  it('2. OpenAIRealtimeAdapter requires an active microphone MediaStream', async () => {
     const openAIAdapter = new OpenAIRealtimeAdapter();
-    const statusChanges: string[] = [];
-    const errors: Error[] = [];
-
     const config: RealtimeVoiceConfig = {
       sampleRate: 24000,
       onTranscript: vi.fn(),
-      onError: (err) => errors.push(err),
-      onStatusChange: (status) => statusChanges.push(status)
+      onError: vi.fn(),
+      onStatusChange: vi.fn()
     };
 
     await expect(openAIAdapter.initialize(config)).rejects.toThrow(
-      'OpenAI Realtime Adapter is currently disabled by feature flag in this build.'
+      'OpenAI Realtime requires an active microphone MediaStream.'
     );
-
-    expect(statusChanges).toContain('connecting');
-    expect(statusChanges[statusChanges.length - 1]).toBe('disconnected');
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors[0].message).toContain('disabled by feature flag');
   });
 
-  it('3. OpenAIRealtimeAdapter provides compliant ProviderDiagnostics even when disabled', () => {
+  it('3. OpenAIRealtimeAdapter provides compliant ProviderDiagnostics before connection', () => {
     const openAIAdapter = new OpenAIRealtimeAdapter();
     const diagnostics: ProviderDiagnostics = openAIAdapter.getDiagnostics();
 
-    expect(diagnostics.providerName).toBe('OpenAIRealtimeAdapter');
+    expect(diagnostics.providerName).toBe('OpenAIRealtimeProvider');
     expect(diagnostics.status).toBe('disconnected');
     expect(diagnostics.model).toBe(OPENAI_REALTIME_CONFIG.model);
-    expect(diagnostics.hasWarning).toBe(true);
-    expect(diagnostics.warningMessage).toContain('disabled by feature flag');
+    expect(diagnostics.hasWarning).toBe(false);
+    expect(diagnostics.warningMessage).toBeNull();
     expect(Array.isArray(diagnostics.transcriptLog)).toBe(true);
     expect(Array.isArray(diagnostics.rawEventLog)).toBe(true);
   });
 
   it('4. getRealtimeVoiceProvider factory returns appropriate provider based on config', () => {
-    // 1. Production default returns GeminiLiveAdapter
-    const defaultProvider = getRealtimeVoiceProvider('gemini-live');
-    expect(defaultProvider).toBeInstanceOf(GeminiLiveAdapter);
+    // 1. Production default is OpenAI Realtime
+    const defaultProvider = getRealtimeVoiceProvider('openai-realtime');
+    expect(defaultProvider).toBeInstanceOf(OpenAIRealtimeAdapter);
+
+    // Gemini remains available as an explicit fallback
+    const geminiProvider = getRealtimeVoiceProvider('gemini-live');
+    expect(geminiProvider).toBeInstanceOf(GeminiLiveAdapter);
 
     // 2. Explicit mock provider returns MockVoiceAdapter
     const mockProvider = getRealtimeVoiceProvider('mock');
     expect(mockProvider).toBeInstanceOf(MockVoiceAdapter);
 
-    // 3. OpenAI request returns OpenAIRealtimeAdapter stub
+    // 3. OpenAI request returns OpenAIRealtimeAdapter
     const openAIProvider = getRealtimeVoiceProvider('openai-realtime');
     expect(openAIProvider).toBeInstanceOf(OpenAIRealtimeAdapter);
   });
 
-  it('5. getAvailableVoiceProviders lists Gemini as production ready and OpenAI as disabled', () => {
+  it('5. getAvailableVoiceProviders lists OpenAI and Gemini as production-ready providers', () => {
     const providers = getAvailableVoiceProviders();
     expect(providers.length).toBe(3);
 
@@ -106,7 +102,7 @@ describe('RealtimeVoiceProvider Contract & Feature Flag Tests', () => {
 
     const openai = providers.find((p) => p.id === 'openai-realtime');
     expect(openai).toBeDefined();
-    expect(openai?.isProductionReady).toBe(false);
-    expect(openai?.enabled).toBe(false);
+    expect(openai?.isProductionReady).toBe(true);
+    expect(openai?.enabled).toBe(true);
   });
 });

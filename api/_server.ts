@@ -22,6 +22,7 @@ import { checkEndpointRateLimit, checkAndIncrementUserLimit } from '../src/servi
 import { validateEnvironmentVariables } from '../src/services/envValidation';
 import sessionCreateHandler from './session-create';
 import sessionMintHandler from './session-mint';
+import sessionMintOpenAIHandler from './session-mint-openai';
 import billingHandler from './billing';
 
 // Load local overrides first, then shared defaults. Local files remain git-ignored.
@@ -232,21 +233,8 @@ async function createApp() {
   // entitlement reservation by calling the mint endpoint directly.
   app.post('/api/session/mint', (req: any, res: any) => sessionMintHandler(req, res));
 
-  // API ROUTE 3.1: OpenAI Realtime Ephemeral Session Token Placeholder (Disabled)
-  app.all(['/api/session/mint-openai', '/api/session/mint-openai/*'], async (req: any, res: any) => {
-    ServerLogger.info('OpenAI Realtime credential requested but provider is disabled by feature flag.', {
-      requestId: req.requestId,
-      action: 'mint_openai_token_disabled',
-      path: req.path
-    });
-
-    res.status(501).json({
-      error: 'OpenAI Realtime provider is disabled in this build. Gemini Live remains the active production provider.',
-      provider: 'openai-realtime',
-      enabled: false,
-      documentation: 'https://platform.openai.com/docs/guides/realtime'
-    });
-  });
+  // API ROUTE 3.1: Paid-session-authorized OpenAI Realtime WebRTC call creation.
+  app.post('/api/session/mint-openai', (req: any, res: any) => sessionMintOpenAIHandler(req, res));
 
   // API ROUTE 4: Authenticated Server-Side Post-Test Evaluation Pipeline
   app.post('/api/evaluations/generate', async (req: any, res: any, next: any) => {

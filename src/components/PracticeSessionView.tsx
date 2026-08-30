@@ -75,7 +75,7 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
   const [showEndModal, setShowEndModal] = useState(false);
 
   const voiceProviderRef = useRef<RealtimeVoiceProvider | null>(null);
-  // Gemini provider callbacks outlive the React render that created them. Keep
+  // Realtime provider callbacks outlive the React render that created them. Keep
   // the latest exam state in a ref so transcript persistence never writes a
   // stale IDLE state during full-test part rotation.
   const currentStateRef = useRef<ExamState>(ExamState.IDLE);
@@ -90,7 +90,7 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
   const part2ClosingSpeechSeenRef = useRef(false);
   const part2ClosingLastVoiceAtRef = useRef(0);
   const part2ClosingSilenceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  // Gemini can emit turnComplete before the final transcription chunk that
+  // A provider can emit turnComplete before the final transcription chunk that
   // contains the Part 2 closing question. Track that signal independently so
   // the closing-answer microphone can be armed regardless of event ordering.
   const part2ClosingExaminerTurnCompleteRef = useRef(false);
@@ -103,6 +103,7 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
   const terminalAdvanceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const {
+    controller,
     deviceState,
     recordingState,
     inputLevel,
@@ -365,7 +366,7 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
     };
   }, [currentState]);
 
-  // Part 2 uses manual Gemini VAD so ordinary pauses cannot end the long turn.
+  // Part 2 uses manual provider turn boundaries so ordinary pauses cannot end the long turn.
   // The brief closing question still needs a natural endpoint, so once the
   // candidate has actually started that short answer we end its manual activity
   // after ~1.6s of local silence. This logic affects ONLY the closing question.
@@ -515,8 +516,8 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
       throw new Error('The selected test snapshot is unavailable.');
     }
 
-    // Each part gets a fresh boundary-detection buffer. Gemini Live output
-    // transcription often arrives in several small chunks, so we keep a
+    // Each part gets a fresh boundary-detection buffer. Realtime output
+    // transcription can arrive in several chunks, so we keep a
     // rolling buffer during the part and reset it when the provider rotates.
     examinerControlBufferRef.current = '';
     partBoundaryHandledRef.current = false;
@@ -559,12 +560,24 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
         ? buildPart2SystemInstruction(session.selectedTestSnapshot)
         : buildPart1SystemInstruction(session.selectedTestSnapshot);
 
+    // OpenAI WebRTC sends the existing microphone MediaStream directly. Keep
+    // Part 2 muted until the app explicitly opens the candidate's long turn.
+    if (part === IELTSExamPart.PART_2) {
+      setMuted(true);
+    }
+
+    const mediaStream = controller.getMediaStream();
+    if (!mediaStream) {
+      throw new Error('The microphone stream is unavailable for the realtime examiner.');
+    }
+
     setConnectionStatus('connecting');
     await provider.initialize({
       sampleRate: 16000,
       sessionId: session.id,
+      mediaStream,
       systemInstruction,
-      // Part 2's long turn must survive natural pauses. Gemini server-side VAD
+      // Part 2's long turn must survive natural pauses. Server-side VAD
       // would otherwise commit the candidate turn on silence and make the
       // examiner respond early. Keep Parts 1/3 automatic, but make all Part 2
       // user turns application-controlled.
@@ -582,7 +595,7 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
         // short answer. A tiny client-side silence detector below will close it.
         if (part === IELTSExamPart.PART_2 && speaker === 'examiner' && isComplete) {
           // Do not assume output transcription arrives before turnComplete.
-          // Gemini commonly delivers turnComplete first. Mark the examiner
+          // Providers can deliver turn-complete before transcript completion. Mark the examiner
           // closing turn complete, then arm immediately if the closing-question
           // text has already been detected; otherwise transcript handling will
           // call the same gate when that text arrives.
@@ -609,7 +622,7 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
         clearQueue();
       },
       onError: (err) => {
-        console.error('Gemini Live Voice Error:', err);
+        console.error('Realtime voice provider error:', err);
         setCurrentState(ExamState.FAILED);
         setErrorMessage(err.message);
       },
@@ -752,7 +765,7 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
       terminalCandidateAnsweredRef.current = true;
     }
 
-    // Detect examiner control phrases across a rolling buffer. Gemini Live can
+    // Detect examiner control phrases across a rolling buffer. Realtime providers can
     // split one spoken sentence into multiple output-transcription callbacks,
     // so checking only the current `text` chunk is not reliable.
     if (speaker === 'examiner' && isFinal && session?.selectedTestSnapshot) {
@@ -799,8 +812,8 @@ export const PracticeSessionView: React.FC<PracticeSessionViewProps> = ({ sessio
           part2SpeakingStartedRef.current = true;
           setSpeakingSeconds(0);
           part2SpeechExpiryTriggeredRef.current = false;
-          // Start ONE manual Gemini user activity for the entire two-minute
-          // answer. Gemini will keep receiving audio across pauses but cannot
+          // Start ONE manual user activity for the entire two-minute
+          // answer. The provider will keep receiving audio across pauses but cannot
           // commit the turn until the app ends this activity.
           voiceProviderRef.current?.startUserActivity?.();
           setMuted(false);

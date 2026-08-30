@@ -5,6 +5,9 @@
 
 export interface EnvValidationReport {
   geminiApiKeyConfigured: boolean;
+  openaiApiKeyConfigured: boolean;
+  openaiRealtimeModel: string;
+  openaiRealtimeVoice: string;
   geminiLiveModel: string;
   geminiEvaluationModel: string;
   firebaseServerConfigured: boolean;
@@ -44,9 +47,17 @@ export function validateEnvironmentVariables(): EnvValidationReport {
   );
 
   if (!geminiApiKeyConfigured) {
-    warnings.push('GEMINI_API_KEY is missing or set to a placeholder. Gemini Live token minting and server-side AI evaluation are unavailable.');
+    warnings.push('GEMINI_API_KEY is missing or set to a placeholder. Server-side IELTS evaluation is unavailable.');
   }
 
+  const openaiApiKey = process.env.OPENAI_API_KEY;
+  const openaiApiKeyConfigured = Boolean(openaiApiKey && openaiApiKey.trim() !== '');
+  if (!openaiApiKeyConfigured) {
+    warnings.push('OPENAI_API_KEY is missing. OpenAI Realtime speaking sessions are unavailable.');
+  }
+
+  const openaiRealtimeModel = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1';
+  const openaiRealtimeVoice = process.env.OPENAI_REALTIME_VOICE || 'marin';
   const geminiLiveModel = process.env.GEMINI_LIVE_MODEL || 'gemini-3.1-flash-live-preview';
   const geminiEvaluationModel = process.env.GEMINI_EVALUATION_MODEL || 'gemini-3.6-flash';
 
@@ -63,7 +74,7 @@ export function validateEnvironmentVariables(): EnvValidationReport {
     warnings.push('ALLOWED_ORIGINS is empty in production; cross-origin browser requests will not be permitted.');
   }
 
-  const isReady = geminiApiKeyConfigured && firebaseServerConfigured;
+  const isReady = geminiApiKeyConfigured && openaiApiKeyConfigured && firebaseServerConfigured;
   const status: EnvValidationReport['status'] = isReady
     ? 'ready'
     : process.env.NODE_ENV === 'production'
@@ -72,6 +83,9 @@ export function validateEnvironmentVariables(): EnvValidationReport {
 
   return {
     geminiApiKeyConfigured,
+    openaiApiKeyConfigured,
+    openaiRealtimeModel,
+    openaiRealtimeVoice,
     geminiLiveModel,
     geminiEvaluationModel,
     firebaseServerConfigured,

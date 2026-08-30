@@ -1,6 +1,6 @@
 import { ensureSessionFirebaseAdmin, firebaseCredentialPresence } from './_firebaseSessionAdmin';
 
-const API_REVISION = '1.1.9';
+const API_REVISION = '1.2.0-openai-realtime';
 
 export default async function readiness(_req: any, res: any) {
   const geminiApiKeyConfigured = Boolean(
@@ -8,6 +8,7 @@ export default async function readiness(_req: any, res: any) {
     process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY' &&
     process.env.GEMINI_API_KEY.trim()
   );
+  const openaiApiKeyConfigured = Boolean(process.env.OPENAI_API_KEY?.trim());
   const firebaseServerConfigured = firebaseCredentialPresence();
   const allowedOriginsConfigured = Boolean(process.env.ALLOWED_ORIGINS?.trim());
 
@@ -29,7 +30,7 @@ export default async function readiness(_req: any, res: any) {
     }
   }
 
-  const ready = geminiApiKeyConfigured && firebaseServerConfigured && firebaseAdminInitialized;
+  const ready = geminiApiKeyConfigured && openaiApiKeyConfigured && firebaseServerConfigured && firebaseAdminInitialized;
   res.setHeader('Cache-Control', 'no-store');
   return res.status(ready ? 200 : 503).json({
     status: ready ? (firestoreReachable ? 'ready' : 'degraded') : 'misconfigured',
@@ -38,6 +39,9 @@ export default async function readiness(_req: any, res: any) {
     timestamp: Date.now(),
     environment: {
       geminiApiKeyConfigured,
+      openaiApiKeyConfigured,
+      openaiRealtimeModel: process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1',
+      openaiRealtimeVoice: process.env.OPENAI_REALTIME_VOICE || 'marin',
       firebaseServerConfigured,
       firebaseAdminInitialized,
       firestoreReachable,
@@ -46,7 +50,8 @@ export default async function readiness(_req: any, res: any) {
       geminiEvaluationModel: process.env.GEMINI_EVALUATION_MODEL || 'gemini-3.6-flash',
     },
     warnings: [
-      ...(!geminiApiKeyConfigured ? ['GEMINI_API_KEY is missing or invalid.'] : []),
+      ...(!openaiApiKeyConfigured ? ['OPENAI_API_KEY is missing; live speaking sessions cannot start.'] : []),
+      ...(!geminiApiKeyConfigured ? ['GEMINI_API_KEY is missing or invalid; post-test evaluation cannot run.'] : []),
       ...(!firebaseServerConfigured ? ['Firebase Admin credentials are missing.'] : []),
       ...(firebaseServerConfigured && !firebaseAdminInitialized ? ['Firebase Admin credentials are present but cannot initialize.'] : []),
       ...(firebaseAdminInitialized && !firestoreReachable ? ['Firebase Admin initialized, but Firestore is not reachable. Session launch will use recovery persistence.'] : []),

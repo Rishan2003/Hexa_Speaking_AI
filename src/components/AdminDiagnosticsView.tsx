@@ -231,7 +231,7 @@ export const AdminDiagnosticsView: React.FC<AdminDiagnosticsProps> = ({
           <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1">
             <div className="font-semibold text-xs text-slate-700 dark:text-slate-300">Ephemeral Token Limit</div>
             <div className="text-lg font-bold text-indigo-600 dark:text-indigo-400">20 / User / Day</div>
-            <p className="text-xs text-slate-500">Restricts Gemini Live WebSocket minting</p>
+            <p className="text-xs text-slate-500">Restricts realtime voice session creation</p>
           </div>
 
           <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1">

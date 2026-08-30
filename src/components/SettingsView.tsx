@@ -295,7 +295,7 @@ export const SettingsView: React.FC = () => {
                 Enable Simulated Mock Examiner Mode
               </label>
               <span className="text-[10px] text-gray-500 leading-normal block mt-1">
-                When active, the browser runs offline using a keyboard-driven simulated examiner, allowing quick verification without requiring Gemini Live credits or Firebase configurations.
+                When active, the browser runs offline using a keyboard-driven simulated examiner, allowing quick verification without requiring realtime voice API credits or Firebase configuration.
               </span>
             </div>
           </div>

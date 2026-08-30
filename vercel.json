@@ -16,6 +16,10 @@
       "destination": "/api/session-mint"
     },
     {
+      "source": "/api/session/mint-openai",
+      "destination": "/api/session-mint-openai"
+    },
+    {
       "source": "/api/session/:path*",
       "destination": "/api/index?path=session/:path*"
     },
@@ -132,6 +136,9 @@
     },
     "api/billing.ts": {
       "maxDuration": 30
+    },
+    "api/session-mint-openai.ts": {
+      "maxDuration": 20
     }
   }
 }

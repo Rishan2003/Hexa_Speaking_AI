@@ -1,6 +1,6 @@
 {
   "name": "HEXA'S Education - Speaking AI",
-  "description": "A HEXA'S Education IELTS speaking practice workspace with deterministic exam flow, Gemini Live voice examiner, and structured assessment.",
+  "description": "A HEXA'S Education IELTS speaking practice workspace with deterministic exam flow, OpenAI Realtime voice examiner, and structured assessment.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -3,13 +3,16 @@
 ## Configuration
 
 - [ ] `PORT` is supplied by the platform or defaults to `3000`.
-- [ ] `GEMINI_API_KEY` is stored in a server secret manager.
-- [ ] `GEMINI_LIVE_MODEL=gemini-3.1-flash-live-preview`.
+- [ ] `OPENAI_API_KEY` is stored in a server secret manager.
+- [ ] `OPENAI_REALTIME_MODEL=gpt-realtime-2.1`.
+- [ ] `OPENAI_REALTIME_VOICE=marin` (or another supported Realtime voice).
+- [ ] `OPENAI_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe`.
+- [ ] `GEMINI_API_KEY` is stored server-side for post-test evaluation.
 - [ ] `GEMINI_EVALUATION_MODEL=gemini-3.6-flash`.
 - [ ] `GEMINI_EVALUATION_FALLBACK_MODEL=gemini-3.5-flash`.
 - [ ] `ALLOW_SANDBOX_EVALUATIONS=false` in production.
 - [ ] `VITE_USE_MOCKS=false` in the production browser build.
-- [ ] `VITE_GEMINI_LIVE_MODEL` matches the server Live model.
+- [ ] `VITE_OPENAI_REALTIME_MODEL` and `VITE_OPENAI_REALTIME_VOICE` match the server Realtime settings.
 - [ ] `ALLOWED_ORIGINS` contains every permitted production origin.
 - [ ] Complete Firebase Web values are supplied through `VITE_FIREBASE_*`.
 - [ ] Firebase Admin uses a service account or Application Default Credentials.
@@ -34,8 +37,8 @@ Then verify:
 - [ ] Sign-up/sign-in works on the HTTPS production domain.
 - [ ] Session creation rejects missing or invalid Firebase ID tokens.
 - [ ] Part 1, Part 2, Part 3, and Full modes restore with the selected mode and correct starting part.
-- [ ] Gemini token minting uses `POST` and never returns the permanent API key.
-- [ ] The Live provider reaches `setupComplete`, streams microphone PCM, and plays examiner audio.
+- [ ] OpenAI Realtime call creation uses authenticated `POST /api/session/mint-openai` and never returns the permanent API key.
+- [ ] The OpenAI Realtime provider establishes WebRTC, sends the microphone `MediaStream`, receives examiner audio, and opens its data channel.
 - [ ] Full mode rotates examiner instructions correctly between all three parts.
 - [ ] Part 2 preparation and speaking timers transition correctly.
 - [ ] Evaluation generation/retrieval is limited to the owning user.

@@ -28,7 +28,6 @@ export function getRealtimeVoiceProvider(
 
   switch (selectedProvider) {
     case 'openai-realtime':
-      // Return OpenAIRealtimeAdapter stub (will enforce feature flag check during initialize)
       return new OpenAIRealtimeAdapter();
 
     case 'mock':
@@ -36,7 +35,6 @@ export function getRealtimeVoiceProvider(
 
     case 'gemini-live':
     default:
-      // Active production default provider
       return new GeminiLiveAdapter();
   }
 }
@@ -53,7 +51,7 @@ export function getAvailableVoiceProviders(): Array<{
   return [
     {
       id: 'gemini-live',
-      name: 'Gemini Live Voice Examiner (Gemini 3.1 Flash Live)',
+      name: 'Gemini Live Voice Examiner (fallback)',
       isProductionReady: true,
       enabled: true
     },
@@ -65,8 +63,8 @@ export function getAvailableVoiceProviders(): Array<{
     },
     {
       id: 'openai-realtime',
-      name: 'OpenAI Realtime Examiner (Disabled Stub)',
-      isProductionReady: false,
+      name: 'OpenAI Realtime Examiner (WebRTC)',
+      isProductionReady: true,
       enabled: OPENAI_REALTIME_CONFIG.enabled || APP_CONFIG.enableOpenAIRealtime
     }
   ];

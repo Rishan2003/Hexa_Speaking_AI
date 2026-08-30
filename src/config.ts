@@ -12,6 +12,8 @@ type BrowserEnv = Partial<Record<
   | 'VITE_USE_MOCKS'
   | 'VITE_GEMINI_LIVE_MODEL'
   | 'VITE_GEMINI_EVALUATION_MODEL'
+  | 'VITE_OPENAI_REALTIME_MODEL'
+  | 'VITE_OPENAI_REALTIME_VOICE'
   | 'VITE_APP_URL',
   string
 >>;
@@ -36,10 +38,14 @@ export const APP_CONFIG = {
   useMocks: storedMockPreference === null ? defaultMockMode : storedMockPreference === 'true',
 
   // Active production real-time voice provider
-  defaultRealtimeProvider: 'gemini-live' as 'gemini-live' | 'mock' | 'openai-realtime',
+  defaultRealtimeProvider: 'openai-realtime' as 'gemini-live' | 'mock' | 'openai-realtime',
 
-  // Feature flag for future OpenAI Realtime Provider adapter (Disabled)
-  enableOpenAIRealtime: false,
+  // OpenAI Realtime is the active live speaking provider. Gemini remains available as a fallback adapter.
+  enableOpenAIRealtime: true,
+
+  // Browser-visible identifiers only; OPENAI_API_KEY remains server-side.
+  openaiRealtimeModel: viteEnv.VITE_OPENAI_REALTIME_MODEL || 'gpt-realtime-2.1',
+  openaiRealtimeVoice: viteEnv.VITE_OPENAI_REALTIME_VOICE || 'marin',
 
   // Live real-time audio voice examiner model identifier
   geminiVoiceModel: viteEnv.VITE_GEMINI_LIVE_MODEL || 'gemini-3.1-flash-live-preview',

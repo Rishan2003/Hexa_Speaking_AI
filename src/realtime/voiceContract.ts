@@ -15,6 +15,8 @@ export interface RealtimeVoiceConfig {
   sampleRate: number;
   /** Authoritative server-created speaking session used to authorize paid token minting. */
   sessionId?: string;
+  /** Existing browser microphone stream for providers that transport audio natively (for example WebRTC). */
+  mediaStream?: MediaStream;
   onAudioData?: (chunk: Int16Array) => void;
   onTranscript: (speaker: 'examiner' | 'candidate', text: string, isFinal: boolean) => void;
   onError: (error: Error) => void;
